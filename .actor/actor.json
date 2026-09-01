@@ -6,5 +6,9 @@
     "version": "0.1",
     "buildTag": "latest",
     "input": "./input_schema.json",
-    "dockerfile": "../Dockerfile"
+    "dockerfile": "../Dockerfile",
+    "defaultRunOptions": {
+        "memoryMbytes": 1024,
+        "timeoutSecs": 3600
+    }
 }

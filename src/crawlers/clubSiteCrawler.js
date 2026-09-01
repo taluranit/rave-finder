@@ -4,6 +4,23 @@ import { classifyGenres } from '../genreClassifier.js';
 
 const WEBSITE_CONTENT_CRAWLER_ACTOR_ID = 'apify/website-content-crawler';
 const MAX_CRAWL_PAGES_PER_SITE = 8; // club sites are small; a handful of pages covers the events/program page
+const CLUB_SITE_CONCURRENCY = 5; // sites are crawled independently — no reason to serialize 15 Actor calls
+
+/** Runs `fn` over `items` with at most `concurrency` in flight at once. */
+async function mapWithConcurrency(items, concurrency, fn) {
+    const results = new Array(items.length);
+    let nextIndex = 0;
+
+    async function worker() {
+        while (nextIndex < items.length) {
+            const i = nextIndex++;
+            results[i] = await fn(items[i]);
+        }
+    }
+
+    await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+    return results;
+}
 
 const DATE_ISO_RE = /\b(\d{4})-(\d{2})-(\d{2})\b/;
 const DATE_CZ_NUMERIC_RE = /\b(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4})\b/;
@@ -88,9 +105,8 @@ export function extractEventsFromMarkdown(text, source) {
  */
 export async function crawlClubSites() {
     const client = Actor.newClient();
-    const results = [];
 
-    for (const source of CLUB_SITES) {
+    const perSiteEvents = await mapWithConcurrency(CLUB_SITES, CLUB_SITE_CONCURRENCY, async (source) => {
         try {
             log.info(`Running website-content-crawler for ${source.name} (${source.url})...`);
             const run = await client.actor(WEBSITE_CONTENT_CRAWLER_ACTOR_ID).call({
@@ -108,19 +124,21 @@ export async function crawlClubSites() {
             });
 
             const { items } = await client.dataset(run.defaultDatasetId).listItems();
+            const events = [];
             for (const item of items) {
                 // Field name has varied across website-content-crawler versions; check the
                 // likely candidates rather than assuming one.
                 const text = item.text || item.markdown || item.plainText || '';
-                const events = extractEventsFromMarkdown(text, source);
-                results.push(...events);
+                events.push(...extractEventsFromMarkdown(text, source));
             }
 
-            log.info(`${source.name}: extracted ${results.length} candidate event(s) so far.`);
+            log.info(`${source.name}: extracted ${events.length} candidate event(s).`);
+            return events;
         } catch (err) {
             log.warning(`Club site crawl failed for ${source.name}: ${err.message}`);
+            return [];
         }
-    }
+    });
 
-    return results;
+    return perSiteEvents.flat();
 }
