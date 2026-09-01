@@ -77,5 +77,11 @@ export async function crawlFacebookEvents({ genres, city, maxFacebookEvents }) {
         });
     }
 
-    return results.filter((e) => e.date);
+    // Requiring real coordinates (not just a date) matters specifically here: Facebook's
+    // search isn't location-scoped (see README) and returns plenty of international results,
+    // so an event with no location.latitude/longitude would otherwise fall through to
+    // main.js's string-based geocode fallback — which for an event with no real city either
+    // ends up geocoding just the input city itself, i.e. an unrelated event "passing" the
+    // radius filter at ~0km away. Safer to drop it than risk a false-positive location.
+    return results.filter((e) => e.date && typeof e.lat === 'number' && typeof e.lon === 'number');
 }

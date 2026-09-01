@@ -98,19 +98,29 @@ export function extractEventsFromMarkdown(text, source) {
 export async function crawlOneClubSite(client, source) {
     try {
         log.info(`Running website-content-crawler for ${source.name} (${source.url})...`);
-        const run = await client.actor(WEBSITE_CONTENT_CRAWLER_ACTOR_ID).call({
-            startUrls: [{ url: source.url }],
-            maxCrawlPages: MAX_CRAWL_PAGES_PER_SITE,
-            crawlerType: 'cheerio',
-            // KNOWN LIMITATION, confirmed via a live test run: 'cheerio' only reads static
-            // HTML, so on sites where the event listing is JS-rendered this returns thin or
-            // unrelated content (e.g. pulled a static news archive instead of the real
-            // upcoming program on one site). The Actor's other crawler modes render JS
-            // correctly, but require paying per-call via x402 (a crypto/USDC payment rail,
-            // separate from a normal Apify account) rather than the regular account balance —
-            // not worth that trade-off here, so this stays on the free 'cheerio' mode.
-            // Aggregators and Facebook Events carry more of the real signal as a result.
-        });
+        const run = await client.actor(WEBSITE_CONTENT_CRAWLER_ACTOR_ID).call(
+            {
+                startUrls: [{ url: source.url }],
+                maxCrawlPages: MAX_CRAWL_PAGES_PER_SITE,
+                crawlerType: 'cheerio',
+                // KNOWN LIMITATION, confirmed via a live test run: 'cheerio' only reads static
+                // HTML, so on sites where the event listing is JS-rendered this returns thin or
+                // unrelated content (e.g. pulled a static news archive instead of the real
+                // upcoming program on one site). The Actor's other crawler modes render JS
+                // correctly, but require paying per-call via x402 (a crypto/USDC payment rail,
+                // separate from a normal Apify account) rather than the regular account balance —
+                // not worth that trade-off here, so this stays on the free 'cheerio' mode.
+                // Aggregators and Facebook Events carry more of the real signal as a result.
+            },
+            {
+                // The Actor's own default is 8192MB — confirmed live that requesting that much
+                // per concurrent call blows through the account's total 16384MB memory ceiling
+                // almost immediately once more than one or two crawls overlap, failing nearly
+                // every club site outright. Fetching a handful of static HTML pages needs
+                // nowhere near that.
+                memory: 512,
+            },
+        );
 
         const { items } = await client.dataset(run.defaultDatasetId).listItems();
         const events = [];
