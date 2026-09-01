@@ -43,30 +43,41 @@ export async function geocode(query) {
         return store[cacheKey];
     }
 
-    await throttle();
-
     const url = new URL(NOMINATIM_URL);
     url.searchParams.set('q', query);
     url.searchParams.set('format', 'json');
     url.searchParams.set('limit', '1');
 
     let result = null;
-    try {
-        const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
-        if (response.ok) {
-            const results = await response.json();
-            if (results.length > 0) {
-                result = { lat: parseFloat(results[0].lat), lon: parseFloat(results[0].lon) };
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts && !result; attempt++) {
+        await throttle();
+        try {
+            const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
+            if (response.ok) {
+                const results = await response.json();
+                if (results.length > 0) {
+                    result = { lat: parseFloat(results[0].lat), lon: parseFloat(results[0].lon) };
+                } else {
+                    break; // a clean "no results" response — retrying won't change that
+                }
+            } else {
+                log.warning(`Nominatim returned ${response.status} for query "${query}" (attempt ${attempt}/${maxAttempts})`);
             }
-        } else {
-            log.warning(`Nominatim returned ${response.status} for query "${query}"`);
+        } catch (err) {
+            log.warning(`Geocoding failed for "${query}": ${err.message} (attempt ${attempt}/${maxAttempts})`);
         }
-    } catch (err) {
-        log.warning(`Geocoding failed for "${query}": ${err.message}`);
+        if (!result && attempt < maxAttempts) {
+            await new Promise((resolve) => setTimeout(resolve, attempt * 1000)); // back off before retrying
+        }
     }
 
-    store[cacheKey] = result;
-    await persistCache();
+    // Only cache successes. A failed lookup might just be a transient network/rate-limit
+    // issue — caching it would replay that failure on every future run forever.
+    if (result) {
+        store[cacheKey] = result;
+        await persistCache();
+    }
 
     return result;
 }
