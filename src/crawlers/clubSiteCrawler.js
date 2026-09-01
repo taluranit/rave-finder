@@ -1,26 +1,11 @@
 import { Actor, log } from 'apify';
 import { CLUB_SITES } from '../sources/seedSources.js';
 import { classifyGenres } from '../genreClassifier.js';
+import { mapWithConcurrency } from '../concurrency.js';
 
 const WEBSITE_CONTENT_CRAWLER_ACTOR_ID = 'apify/website-content-crawler';
 const MAX_CRAWL_PAGES_PER_SITE = 8; // club sites are small; a handful of pages covers the events/program page
 const CLUB_SITE_CONCURRENCY = 5; // sites are crawled independently — no reason to serialize 15 Actor calls
-
-/** Runs `fn` over `items` with at most `concurrency` in flight at once. */
-async function mapWithConcurrency(items, concurrency, fn) {
-    const results = new Array(items.length);
-    let nextIndex = 0;
-
-    async function worker() {
-        while (nextIndex < items.length) {
-            const i = nextIndex++;
-            results[i] = await fn(items[i]);
-        }
-    }
-
-    await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
-    return results;
-}
 
 const DATE_ISO_RE = /\b(\d{4})-(\d{2})-(\d{2})\b/;
 const DATE_CZ_NUMERIC_RE = /\b(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4})\b/;
@@ -87,6 +72,10 @@ export function extractEventsFromMarkdown(text, source) {
             venue: source.name,
             address: '',
             city: source.city,
+            // Carried through when the caller already knows the venue's coordinates (e.g. a
+            // Google Maps discovery result) so downstream doesn't need to re-geocode it.
+            lat: source.lat,
+            lon: source.lon,
             description: '',
             genres,
             sourceName: source.name,
@@ -99,46 +88,57 @@ export function extractEventsFromMarkdown(text, source) {
 }
 
 /**
- * Crawls all seeded club sites via the apify/website-content-crawler Actor (free to run)
- * and heuristically extracts event-like entries from the resulting page text.
+ * Crawls one site via the apify/website-content-crawler Actor (free `cheerio` mode) and
+ * heuristically extracts event-like entries from the resulting page text. Shared between
+ * the seeded CLUB_SITES list and dynamically Maps-discovered venues.
+ * @param {import('apify').ApifyClient} client
+ * @param {{name: string, city?: string, url: string, confidence: string, lat?: number, lon?: number}} source
  * @returns {Promise<object[]>}
  */
-export async function crawlClubSites() {
-    const client = Actor.newClient();
+export async function crawlOneClubSite(client, source) {
+    try {
+        log.info(`Running website-content-crawler for ${source.name} (${source.url})...`);
+        const run = await client.actor(WEBSITE_CONTENT_CRAWLER_ACTOR_ID).call({
+            startUrls: [{ url: source.url }],
+            maxCrawlPages: MAX_CRAWL_PAGES_PER_SITE,
+            crawlerType: 'cheerio',
+            // KNOWN LIMITATION, confirmed via a live test run: 'cheerio' only reads static
+            // HTML, so on sites where the event listing is JS-rendered this returns thin or
+            // unrelated content (e.g. pulled a static news archive instead of the real
+            // upcoming program on one site). The Actor's other crawler modes render JS
+            // correctly, but require paying per-call via x402 (a crypto/USDC payment rail,
+            // separate from a normal Apify account) rather than the regular account balance —
+            // not worth that trade-off here, so this stays on the free 'cheerio' mode.
+            // Aggregators and Facebook Events carry more of the real signal as a result.
+        });
 
-    const perSiteEvents = await mapWithConcurrency(CLUB_SITES, CLUB_SITE_CONCURRENCY, async (source) => {
-        try {
-            log.info(`Running website-content-crawler for ${source.name} (${source.url})...`);
-            const run = await client.actor(WEBSITE_CONTENT_CRAWLER_ACTOR_ID).call({
-                startUrls: [{ url: source.url }],
-                maxCrawlPages: MAX_CRAWL_PAGES_PER_SITE,
-                crawlerType: 'cheerio',
-                // KNOWN LIMITATION, confirmed via a live test run: 'cheerio' only reads static
-                // HTML, so on sites where the event listing is JS-rendered this returns thin or
-                // unrelated content (e.g. pulled a static news archive instead of the real
-                // upcoming program on one site). The Actor's other crawler modes render JS
-                // correctly, but require paying per-call via x402 (a crypto/USDC payment rail,
-                // separate from a normal Apify account) rather than the regular account balance —
-                // not worth that trade-off here, so this stays on the free 'cheerio' mode.
-                // Aggregators and Facebook Events carry more of the real signal as a result.
-            });
-
-            const { items } = await client.dataset(run.defaultDatasetId).listItems();
-            const events = [];
-            for (const item of items) {
-                // Field name has varied across website-content-crawler versions; check the
-                // likely candidates rather than assuming one.
-                const text = item.text || item.markdown || item.plainText || '';
-                events.push(...extractEventsFromMarkdown(text, source));
-            }
-
-            log.info(`${source.name}: extracted ${events.length} candidate event(s).`);
-            return events;
-        } catch (err) {
-            log.warning(`Club site crawl failed for ${source.name}: ${err.message}`);
-            return [];
+        const { items } = await client.dataset(run.defaultDatasetId).listItems();
+        const events = [];
+        for (const item of items) {
+            // Field name has varied across website-content-crawler versions; check the
+            // likely candidates rather than assuming one.
+            const text = item.text || item.markdown || item.plainText || '';
+            events.push(...extractEventsFromMarkdown(text, source));
         }
-    });
 
+        log.info(`${source.name}: extracted ${events.length} candidate event(s).`);
+        return events;
+    } catch (err) {
+        log.warning(`Club site crawl failed for ${source.name}: ${err.message}`);
+        return [];
+    }
+}
+
+/**
+ * Crawls a list of club-like sites (defaults to the seeded CLUB_SITES, but also used for
+ * dynamically Maps-discovered venues — see mapsDiscoveryCrawler.js).
+ * @param {object[]} sources
+ * @returns {Promise<object[]>}
+ */
+export async function crawlClubSites(sources = CLUB_SITES) {
+    const client = Actor.newClient();
+    const perSiteEvents = await mapWithConcurrency(sources, CLUB_SITE_CONCURRENCY, (source) =>
+        crawlOneClubSite(client, source),
+    );
     return perSiteEvents.flat();
 }

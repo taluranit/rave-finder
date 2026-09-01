@@ -1,6 +1,7 @@
 import { Actor, log } from 'apify';
 import { crawlAggregators } from './crawlers/aggregatorCrawler.js';
 import { crawlClubSites } from './crawlers/clubSiteCrawler.js';
+import { discoverClubSitesViaMaps } from './crawlers/mapsDiscoveryCrawler.js';
 import { crawlFacebookEvents } from './crawlers/facebookEventsCrawler.js';
 import { geocode, haversineDistanceKm } from './geocode.js';
 import { dedupeEvents } from './dedupe.js';
@@ -31,6 +32,7 @@ try {
         dateRangeDays = 30,
         includeFacebookEvents = true,
         maxFacebookEvents = 50,
+        maxMapsVenues = 20,
         subscriberEmail,
         digestFrequency = 'weekly',
         resendApiKey,
@@ -48,14 +50,17 @@ try {
     }
 
     // Gather candidate events from every source in parallel. Facebook is skipped entirely
-    // (no cost incurred) if includeFacebookEvents is false.
-    const [aggregatorEvents, clubEvents, facebookEvents] = await Promise.all([
+    // (no cost incurred) if includeFacebookEvents is false; Maps discovery is skipped if
+    // maxMapsVenues is 0. Maps discovery covers cities/venues outside the curated seed list —
+    // its found venues are crawled the same way as the seeded ones once discovered.
+    const [aggregatorEvents, seededClubEvents, mapsClubEvents, facebookEvents] = await Promise.all([
         crawlAggregators(),
         crawlClubSites(),
+        discoverClubSitesViaMaps({ cityCoords, radiusKm, maxMapsVenues }).then((venues) => crawlClubSites(venues)),
         includeFacebookEvents ? crawlFacebookEvents({ genres, city, maxFacebookEvents }) : Promise.resolve([]),
     ]);
 
-    let candidates = [...aggregatorEvents, ...clubEvents, ...facebookEvents];
+    let candidates = [...aggregatorEvents, ...seededClubEvents, ...mapsClubEvents, ...facebookEvents];
     log.info(`Collected ${candidates.length} raw candidate event(s) across all sources.`);
 
     // Keep only events matching a requested genre (an event can match more than one).
@@ -64,11 +69,16 @@ try {
     // Keep only events within the requested date range.
     candidates = candidates.filter((event) => withinDateRange(event.date, dateRangeDays));
 
-    // Geocode each venue (cached) and filter by distance from the city center.
+    // Geocode each venue (cached) and filter by distance from the city center. Events whose
+    // venue coordinates are already known (Maps-discovered venues carry their own lat/lon)
+    // skip this — no point re-geocoding a place Google Maps already located precisely.
     const withDistance = [];
     for (const event of candidates) {
-        const query = event.address ? `${event.address}, ${city}, Czech Republic` : `${event.venue}, ${city || event.city}, Czech Republic`;
-        const venueCoords = await geocode(query);
+        let venueCoords = typeof event.lat === 'number' && typeof event.lon === 'number' ? { lat: event.lat, lon: event.lon } : null;
+        if (!venueCoords) {
+            const query = event.address ? `${event.address}, ${city}, Czech Republic` : `${event.venue}, ${city || event.city}, Czech Republic`;
+            venueCoords = await geocode(query);
+        }
         if (!venueCoords) continue; // can't place it, can't filter it by radius — drop it
 
         const distanceKm = haversineDistanceKm(cityCoords, venueCoords);

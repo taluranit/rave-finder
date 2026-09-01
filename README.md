@@ -10,10 +10,10 @@ sends you a periodic email digest of newly found events.
 ## How it works
 
 1. Geocodes the city you give it (OpenStreetMap Nominatim, no API key needed).
-2. Crawls three kinds of sources in parallel:
+2. Crawls four kinds of sources in parallel:
    - **Aggregators** — listing sites, preferring their embedded JSON-LD event data where
      available, with a heuristic HTML fallback otherwise.
-   - **Club sites** — no structured data, so pages are fetched via the
+   - **Club sites (seeded list)** — no structured data, so pages are fetched via the
      [`apify/website-content-crawler`](https://apify.com/apify/website-content-crawler)
      Actor (free `cheerio` mode) and parsed with date/keyword heuristics. Best-effort by
      nature — see comments in `src/crawlers/clubSiteCrawler.js`. A live test confirmed some
@@ -24,14 +24,23 @@ sends you a periodic email digest of newly found events.
      payment rail separate from a normal Apify account — which isn't worth the trade-off
      here, so this stays on `cheerio`. Aggregators and Facebook Events carry more of the
      real signal as a result.
+   - **Club sites (Maps-discovered)** — the seeded list only covers ~15 venues in a handful
+     of cities, so it contributes nothing for a city outside that list. To cover any Czech
+     city/radius, `src/crawlers/mapsDiscoveryCrawler.js` searches Google Maps
+     ([`compass/crawler-google-places`](https://apify.com/compass/crawler-google-places),
+     ~$1.50 per 1,000 places — billed through the normal Apify account, not x402) for
+     club-like venues near the geocoded city center, then crawls each discovered venue's
+     website the same way as the seeded list. Capped by `maxMapsVenues`; set to `0` to
+     disable.
    - **Facebook Events** — via
      [`apify/facebook-events-scraper`](https://apify.com/apify/facebook-events-scraper),
      searched by genre + city (no hardcoded page list). Skipped if `includeFacebookEvents`
      is false, since it has a real per-event cost (~$0.013/event).
 3. Classifies each event's genre(s) by keyword (CZ + EN), trusting structural tags (e.g.
    DnB e-Heard is always drum & bass) over keyword matches where available.
-4. Geocodes each venue (cached in the key-value store) and filters by distance from the
-   city center.
+4. Geocodes each venue and filters by distance from the city center — cached in the
+   key-value store, except Maps-discovered venues, which already carry their own
+   coordinates from Google Maps and skip this step.
 5. Filters by requested genres and date range, then dedupes events that show up on more
    than one source.
 6. Pushes the results to the default dataset.
@@ -47,6 +56,7 @@ sends you a periodic email digest of newly found events.
 | `dateRangeDays` | integer | `30` | Only include events within this many days from now (1–180). |
 | `includeFacebookEvents` | boolean | `true` | Also search Facebook Events. |
 | `maxFacebookEvents` | integer | `50` | Caps Facebook events fetched, to control cost. |
+| `maxMapsVenues` | integer | `20` | Caps Maps-discovered venues per search term, to control cost; `0` disables Maps discovery. |
 | `subscriberEmail` | string | *(none)* | If set, enables the email digest (see below). |
 | `digestFrequency` | enum | `weekly` | `daily` / `weekly` / `biweekly` / `monthly`. |
 | `resendApiKey` | string (secret) | *(none)* | Required only if `subscriberEmail` is set. |
@@ -96,6 +106,7 @@ first `apify run`, or by running `apify run --input '{"city": "Brno"}'` (see the
 src/main.js                Pipeline orchestration
 src/sources/seedSources.js Seed list of club sites and aggregators
 src/crawlers/               One crawler module per source type
+src/concurrency.js          Bounded-concurrency helper for crawling many sites in parallel
 src/geocode.js              Nominatim geocoding + Haversine distance, KV-cached
 src/genreClassifier.js      Keyword-based genre classification
 src/dedupe.js               Cross-source duplicate detection

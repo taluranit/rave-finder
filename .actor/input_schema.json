@@ -55,6 +55,14 @@
             "default": 50,
             "minimum": 0
         },
+        "maxMapsVenues": {
+            "title": "Max Maps-discovered venues per search term",
+            "type": "integer",
+            "description": "Discovers club-like venues near the city via Google Maps (compass/crawler-google-places, ~$1.50 per 1,000 places), so cities outside the curated seed list still get coverage. Caps results per search term; set to 0 to disable this source entirely.",
+            "editor": "number",
+            "default": 20,
+            "minimum": 0
+        },
         "subscriberEmail": {
             "title": "Subscriber email (optional)",
             "type": "string",
