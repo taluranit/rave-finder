@@ -61,6 +61,12 @@ export async function crawlFacebookEvents({ genres, city, maxFacebookEvents }) {
             venue: item.location?.name || '',
             address: item.location?.streetAddress || '',
             city: item.location?.city || city,
+            // Facebook already gives precise venue coordinates — use them directly rather than
+            // re-geocoding by name/city string downstream. That string-based fallback is what
+            // let an international event with no city set slip past the radius filter: with no
+            // real coordinates to check, it was silently treated as being at the input city.
+            lat: item.location?.latitude,
+            lon: item.location?.longitude,
             description,
             genres: genresMatched,
             sourceName: 'Facebook Events',

@@ -83,7 +83,13 @@ try {
     for (const event of candidates) {
         let venueCoords = typeof event.lat === 'number' && typeof event.lon === 'number' ? { lat: event.lat, lon: event.lon } : null;
         if (!venueCoords) {
-            const query = withCountry(event.address ? `${event.address}, ${city}` : `${event.venue}, ${city || event.city}`);
+            // Prefer the event's own city (e.g. a Facebook event's actual location) over the
+            // input city — using the input city here was the bug that let a Berlin Facebook
+            // event pass a 50km radius filter: the query became "{Berlin venue}, {input city}",
+            // which Nominatim couldn't resolve to the real venue and fell back to matching just
+            // the input city itself, i.e. ~0km away.
+            const eventCity = event.city || city;
+            const query = withCountry(event.address ? `${event.address}, ${eventCity}` : `${event.venue}, ${eventCity}`);
             venueCoords = await geocode(query);
         }
         if (!venueCoords) continue; // can't place it, can't filter it by radius — drop it
