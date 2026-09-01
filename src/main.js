@@ -9,6 +9,13 @@ import { maybeSendDigest } from './email.js';
 
 const CONFIDENCE_RANK = { high: 0, moderate: 1, low: 2 };
 
+// Appends ", Czech Republic" for Nominatim, unless the place already names the country —
+// e.g. a user typing "Návsí, Czech Republic" as the city input would otherwise end up
+// geocoding "Návsí, Czech Republic, Czech Republic", which Nominatim fails to resolve.
+function withCountry(place) {
+    return /czech/i.test(place) ? place : `${place}, Czech Republic`;
+}
+
 function withinDateRange(isoDate, dateRangeDays) {
     if (!isoDate) return false;
     const date = new Date(`${isoDate}T00:00:00Z`);
@@ -44,7 +51,7 @@ try {
 
     log.info(`Rave Finder starting for "${city}", radius ${radiusKm}km, genres: ${genres.join(', ')}.`);
 
-    const cityCoords = await geocode(`${city}, Czech Republic`);
+    const cityCoords = await geocode(withCountry(city));
     if (!cityCoords) {
         throw new Error(`Could not geocode city "${city}" — check the spelling and try again.`);
     }
@@ -76,7 +83,7 @@ try {
     for (const event of candidates) {
         let venueCoords = typeof event.lat === 'number' && typeof event.lon === 'number' ? { lat: event.lat, lon: event.lon } : null;
         if (!venueCoords) {
-            const query = event.address ? `${event.address}, ${city}, Czech Republic` : `${event.venue}, ${city || event.city}, Czech Republic`;
+            const query = withCountry(event.address ? `${event.address}, ${city}` : `${event.venue}, ${city || event.city}`);
             venueCoords = await geocode(query);
         }
         if (!venueCoords) continue; // can't place it, can't filter it by radius — drop it
