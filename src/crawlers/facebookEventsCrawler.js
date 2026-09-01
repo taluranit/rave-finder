@@ -57,14 +57,14 @@ export async function crawlFacebookEvents({ genres, city, maxFacebookEvents }) {
 
         results.push({
             eventName,
-            date: item.startDate || item.date || null,
-            venue: item.location?.name || item.venue || '',
-            address: item.location?.address || item.address || '',
+            date: item.utcStartDate ? item.utcStartDate.slice(0, 10) : null,
+            venue: item.location?.name || '',
+            address: item.location?.streetAddress || '',
             city: item.location?.city || city,
             description,
             genres: genresMatched,
             sourceName: 'Facebook Events',
-            sourceUrl: item.url || item.link || '',
+            sourceUrl: item.url || '',
             confidence: 'moderate',
         });
     }

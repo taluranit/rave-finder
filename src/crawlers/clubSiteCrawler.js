@@ -42,7 +42,7 @@ function parseDateFromLine(line) {
  * titles in separate table cells) — a known limitation of using page text instead of a
  * per-site DOM scraper.
  */
-function extractEventsFromMarkdown(text, source) {
+export function extractEventsFromMarkdown(text, source) {
     const events = [];
     const lines = (text || '').split('\n').map((l) => l.trim()).filter(Boolean);
 
@@ -97,6 +97,14 @@ export async function crawlClubSites() {
                 startUrls: [{ url: source.url }],
                 maxCrawlPages: MAX_CRAWL_PAGES_PER_SITE,
                 crawlerType: 'cheerio',
+                // KNOWN LIMITATION, confirmed via a live test run: 'cheerio' only reads static
+                // HTML, so on sites where the event listing is JS-rendered this returns thin or
+                // unrelated content (e.g. pulled a static news archive instead of the real
+                // upcoming program on one site). The Actor's other crawler modes render JS
+                // correctly, but require paying per-call via x402 (a crypto/USDC payment rail,
+                // separate from a normal Apify account) rather than the regular account balance —
+                // not worth that trade-off here, so this stays on the free 'cheerio' mode.
+                // Aggregators and Facebook Events carry more of the real signal as a result.
             });
 
             const { items } = await client.dataset(run.defaultDatasetId).listItems();

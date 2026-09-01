@@ -15,8 +15,15 @@ sends you a periodic email digest of newly found events.
      available, with a heuristic HTML fallback otherwise.
    - **Club sites** — no structured data, so pages are fetched via the
      [`apify/website-content-crawler`](https://apify.com/apify/website-content-crawler)
-     Actor and parsed with date/keyword heuristics. Best-effort by nature — see comments in
-     `src/crawlers/clubSiteCrawler.js`.
+     Actor (free `cheerio` mode) and parsed with date/keyword heuristics. Best-effort by
+     nature — see comments in `src/crawlers/clubSiteCrawler.js`. A live test confirmed some
+     club program pages are JS-rendered and return thin/unrelated content under the free
+     `cheerio` mode (e.g. a static news archive instead of the real upcoming program). The
+     Actor's other crawler modes render JS correctly, but are billed via
+     [x402](https://blog.apify.com/introducing-x402-agentic-payments/) — a crypto/USDC
+     payment rail separate from a normal Apify account — which isn't worth the trade-off
+     here, so this stays on `cheerio`. Aggregators and Facebook Events carry more of the
+     real signal as a result.
    - **Facebook Events** — via
      [`apify/facebook-events-scraper`](https://apify.com/apify/facebook-events-scraper),
      searched by genre + city (no hardcoded page list). Skipped if `includeFacebookEvents`
@@ -104,4 +111,8 @@ Dockerfile                  apify/actor-node base image
   trade-off for v1 rather than building and maintaining ~20 bespoke site scrapers.
 - Scope is Czech Republic only.
 - The Facebook Events search relies on `apify/facebook-events-scraper`'s own search
-  behavior; there's no guarantee of full coverage for a given city/genre.
+  behavior; there's no guarantee of full coverage for a given city/genre. Confirmed via a
+  live test that its search isn't reliably location-scoped — a query like "drum and bass
+  Brno" can return matching events from anywhere in the world. The radius filter later in
+  the pipeline drops these once venues are geocoded, so it's a wasted API call rather than
+  a wrong result, but coverage for the requested city is weaker than the query suggests.
