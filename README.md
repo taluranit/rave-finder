@@ -1,6 +1,7 @@
 # Rave Finder
 
-Finds upcoming **techno**, **house**, and **drum & bass** events near a Czech city, within a
+Finds upcoming **electronic music and DJ events** — techno, house, drum & bass, and
+generally-electronic events that don't name a specific genre — near a Czech city, within a
 radius you choose. Searches club websites, event aggregators (GoOut, DnB e-Heard,
 ColosseumTicket, KdyKde, xTicket, KoncertyPraha, Rave.cz), and Facebook Events. Optionally
 sends you a periodic email digest of newly found events.
@@ -24,7 +25,7 @@ sends you a periodic email digest of newly found events.
      payment rail separate from a normal Apify account — which isn't worth the trade-off
      here, so this stays on `cheerio`. Aggregators and Facebook Events carry more of the
      real signal as a result.
-   - **Club sites (Maps-discovered)** — the seeded list only covers ~15 venues in a handful
+   - **Club sites (Maps-discovered)** — the seeded list only covers ~17 venues in a handful
      of cities, so it contributes nothing for a city outside that list. To cover any Czech
      city/radius, `src/crawlers/mapsDiscoveryCrawler.js` searches Google Maps
      ([`compass/crawler-google-places`](https://apify.com/compass/crawler-google-places),
@@ -36,8 +37,21 @@ sends you a periodic email digest of newly found events.
      [`apify/facebook-events-scraper`](https://apify.com/apify/facebook-events-scraper),
      searched by genre + city (no hardcoded page list). Skipped if `includeFacebookEvents`
      is false, since it has a real per-event cost (~$0.013/event).
-3. Classifies each event's genre(s) by keyword (CZ + EN), trusting structural tags (e.g.
-   DnB e-Heard is always drum & bass) over keyword matches where available.
+3. Classifies each event's genre(s) — see `src/genreClassifier.js`:
+   - Structural tags win outright (e.g. DnB e-Heard's `forcedGenre: 'drum_and_bass'`).
+   - A specific genre keyword (techno/house/drum & bass, CZ + EN, word-boundary matched —
+     not a plain substring check, since e.g. "techno" as a substring would false-positive on
+     "technologie"/"technické") wins next.
+   - Otherwise, sources already known to be dedicated to electronic music
+     (`trustedElectronic: true` in `seedSources.js` — Rave.cz, GoOut's electronic-music
+     category, and the seed clubs branded as electronic-only venues) still keep the event,
+     tagged generically as `electronic`. This is what makes a branded event like "Beats for
+     Love Experience w/ KANINE" or a local party name survive even though its title names no
+     genre — the source itself is the guarantee.
+   - Everywhere else (general ticketing aggregators, mixed-programming clubs, Facebook
+     search results), an event only survives if its own text carries a generic
+     electronic/DJ signal ("dj", "electronic", "elektronika", "edm", "rave") — this is what
+     keeps rock/jazz/theater listings on those same sources from flooding the output.
 4. Geocodes each venue and filters by distance from the city center — cached in the
    key-value store, except Maps-discovered venues, which already carry their own
    coordinates from Google Maps and skip this step.
@@ -52,7 +66,7 @@ sends you a periodic email digest of newly found events.
 |---|---|---|---|
 | `city` | string | *(required)* | Czech city to search near, e.g. `"Brno"`. |
 | `radiusKm` | integer | `30` | Max distance from the city center, in km (1–300). |
-| `genres` | array | all three | `techno`, `house`, `drum_and_bass`. |
+| `genres` | array | all four | `techno`, `house`, `drum_and_bass`, `electronic` (generic — electronic/DJ events with no specific genre named). |
 | `dateRangeDays` | integer | `30` | Only include events within this many days from now (1–180). |
 | `includeFacebookEvents` | boolean | `true` | Also search Facebook Events. |
 | `maxFacebookEvents` | integer | `50` | Caps Facebook events fetched, to control cost. |
@@ -108,7 +122,7 @@ src/sources/seedSources.js Seed list of club sites and aggregators
 src/crawlers/               One crawler module per source type
 src/concurrency.js          Bounded-concurrency helper for crawling many sites in parallel
 src/geocode.js              Nominatim geocoding + Haversine distance, KV-cached
-src/genreClassifier.js      Keyword-based genre classification
+src/genreClassifier.js      Genre classification: specific keywords, trusted-source fallback
 src/dedupe.js               Cross-source duplicate detection
 src/email.js                Resend digest sending + per-subscriber throttling
 Dockerfile                  apify/actor-node base image
@@ -120,6 +134,12 @@ Dockerfile                  apify/actor-node base image
   matching over page text), not a real per-site scraper — it will miss events on
   unusually-structured pages and occasionally misfire. This is a documented, accepted
   trade-off for v1 rather than building and maintaining ~20 bespoke site scrapers.
+- Genre/electronic-music detection is still keyword-based for anything not from a
+  `trustedElectronic` source — a branded event on a mixed-programming venue or general
+  ticketing aggregator that names neither a genre nor "DJ" anywhere in its listing (e.g. just
+  an artist name) will still be missed. Found while investigating a real gap: Beats for Love
+  Experience (a satellite series at Nová Osmička in Frýdek-Místek) only survives because its
+  listings mention specific DJs/genres — a bare artist-only listing wouldn't.
 - Scope is Czech Republic only.
 - The Facebook Events search relies on `apify/facebook-events-scraper`'s own search
   behavior; there's no guarantee of full coverage for a given city/genre. Confirmed via a

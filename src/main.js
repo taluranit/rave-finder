@@ -35,7 +35,7 @@ try {
     const {
         city,
         radiusKm = 30,
-        genres = ['techno', 'house', 'drum_and_bass'],
+        genres = ['techno', 'house', 'drum_and_bass', 'electronic'],
         dateRangeDays = 30,
         includeFacebookEvents = true,
         maxFacebookEvents = 50,

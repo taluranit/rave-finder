@@ -23,14 +23,14 @@
         "genres": {
             "title": "Genres",
             "type": "array",
-            "description": "Electronic music genres to include.",
+            "description": "Electronic music genres to include. \"Electronic (general)\" covers events that are clearly electronic/DJ music but don't name a specific genre in their own listing (e.g. a branded party or festival satellite event) — kept when the source itself is dedicated to electronic music.",
             "editor": "select",
             "items": {
                 "type": "string",
-                "enum": ["techno", "house", "drum_and_bass"],
-                "enumTitles": ["Techno", "House", "Drum & Bass"]
+                "enum": ["techno", "house", "drum_and_bass", "electronic"],
+                "enumTitles": ["Techno", "House", "Drum & Bass", "Electronic (general)"]
             },
-            "default": ["techno", "house", "drum_and_bass"]
+            "default": ["techno", "house", "drum_and_bass", "electronic"]
         },
         "dateRangeDays": {
             "title": "Date range (days)",

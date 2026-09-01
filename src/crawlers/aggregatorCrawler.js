@@ -1,6 +1,6 @@
 import { CheerioCrawler, log } from 'crawlee';
 import { AGGREGATOR_SITES } from '../sources/seedSources.js';
-import { classifyGenres, looksElectronic } from '../genreClassifier.js';
+import { classifyForInclusion, looksElectronic } from '../genreClassifier.js';
 
 const DATE_ISO_RE = /\b(\d{4})-(\d{2})-(\d{2})\b/;
 const DATE_CZ_RE = /\b(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4})\b/; // e.g. "12. 4. 2026" or "12.4.2026"
@@ -62,7 +62,8 @@ function extractJsonLdEvents($, source) {
  * Best-effort fallback for aggregators without JSON-LD: scan link text for a date pattern
  * and use the link itself as the event title/URL. This is noisy by nature (any dated link
  * on the page matches), so we only keep hits that also look electronic-music-related,
- * unless the source is one we already know is exclusively electronic (forcedGenre).
+ * unless the source is one we already know is dedicated to electronic music (forcedGenre
+ * or trustedElectronic).
  */
 function extractHeuristicEvents($, source) {
     const events = [];
@@ -75,7 +76,7 @@ function extractHeuristicEvents($, source) {
         const date = parseDateFromText(text) || parseDateFromText($el.parent().text());
         if (!date) return;
 
-        if (!source.forcedGenre && !looksElectronic(text)) return;
+        if (!source.forcedGenre && !source.trustedElectronic && !looksElectronic(text)) return;
 
         const title = text.replace(DATE_ISO_RE, '').replace(DATE_CZ_RE, '').trim() || source.name;
         const href = $el.attr('href');
@@ -116,7 +117,9 @@ export async function crawlAggregators() {
             }
 
             for (const event of events) {
-                const genres = source.forcedGenre ? [source.forcedGenre] : classifyGenres(`${event.eventName} ${event.description}`);
+                const genres = source.forcedGenre
+                    ? [source.forcedGenre]
+                    : classifyForInclusion(`${event.eventName} ${event.description}`, { trustedElectronic: source.trustedElectronic });
                 if (genres.length === 0) continue; // not an electronic-music event we can tag
 
                 results.push({

@@ -1,6 +1,6 @@
 import { Actor, log } from 'apify';
 import { CLUB_SITES } from '../sources/seedSources.js';
-import { classifyGenres } from '../genreClassifier.js';
+import { classifyForInclusion } from '../genreClassifier.js';
 import { mapWithConcurrency } from '../concurrency.js';
 
 const WEBSITE_CONTENT_CRAWLER_ACTOR_ID = 'apify/website-content-crawler';
@@ -63,8 +63,8 @@ export function extractEventsFromMarkdown(text, source) {
         if (!title && lines[i + 1]) title = lines[i + 1].replace(/^#+\s*/, '').trim();
         if (!title) continue;
 
-        const genres = classifyGenres(title);
-        if (genres.length === 0) continue; // no genre signal in the title — best-effort skip
+        const genres = classifyForInclusion(title, { trustedElectronic: source.trustedElectronic });
+        if (genres.length === 0) continue; // no genre signal, and source isn't trusted electronic-only
 
         events.push({
             eventName: title,

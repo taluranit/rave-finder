@@ -1,5 +1,5 @@
 import { Actor, log } from 'apify';
-import { classifyGenres } from '../genreClassifier.js';
+import { classifyForInclusion } from '../genreClassifier.js';
 
 const FACEBOOK_EVENTS_SCRAPER_ACTOR_ID = 'UZBnerCFBo5FgGouO'; // apify/facebook-events-scraper
 
@@ -52,7 +52,9 @@ export async function crawlFacebookEvents({ genres, city, maxFacebookEvents }) {
     for (const item of items) {
         const eventName = item.name || item.title || '';
         const description = item.description || '';
-        const genresMatched = classifyGenres(`${eventName} ${description}`);
+        // Not trusted outright: Facebook's own search isn't reliably location- or
+        // genre-scoped (see README), so an event still needs its own electronic/DJ signal.
+        const genresMatched = classifyForInclusion(`${eventName} ${description}`);
         if (genresMatched.length === 0) continue;
 
         results.push({
