@@ -1,0 +1,10 @@
+{
+    "actorSpecification": 1,
+    "name": "rave-finder",
+    "title": "Rave Finder",
+    "description": "Finds upcoming techno, house, and drum & bass events near a Czech city within a chosen radius, pulling from club websites, event aggregators, and Facebook Events. Optionally emails a periodic digest of newly found events.",
+    "version": "0.1",
+    "buildTag": "latest",
+    "input": "./input_schema.json",
+    "dockerfile": "../Dockerfile"
+}

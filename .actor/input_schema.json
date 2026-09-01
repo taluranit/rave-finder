@@ -1,0 +1,83 @@
+{
+    "title": "Rave Finder input",
+    "description": "Find upcoming techno, house, and drum & bass events near a Czech city.",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "city": {
+            "title": "City",
+            "type": "string",
+            "description": "Czech city to search near, e.g. \"Brno\".",
+            "editor": "textfield",
+            "prefill": "Brno"
+        },
+        "radiusKm": {
+            "title": "Radius (km)",
+            "type": "integer",
+            "description": "Maximum distance from the city center to include events, in kilometers.",
+            "editor": "number",
+            "default": 30,
+            "minimum": 1,
+            "maximum": 300
+        },
+        "genres": {
+            "title": "Genres",
+            "type": "array",
+            "description": "Electronic music genres to include.",
+            "editor": "select",
+            "items": {
+                "type": "string",
+                "enum": ["techno", "house", "drum_and_bass"],
+                "enumTitles": ["Techno", "House", "Drum & Bass"]
+            },
+            "default": ["techno", "house", "drum_and_bass"]
+        },
+        "dateRangeDays": {
+            "title": "Date range (days)",
+            "type": "integer",
+            "description": "Only include events happening within this many days from now.",
+            "editor": "number",
+            "default": 30,
+            "minimum": 1,
+            "maximum": 180
+        },
+        "includeFacebookEvents": {
+            "title": "Include Facebook Events",
+            "type": "boolean",
+            "description": "Search Facebook Events in addition to club sites and aggregators (uses the apify/facebook-events-scraper Actor, which has its own usage cost).",
+            "default": true
+        },
+        "maxFacebookEvents": {
+            "title": "Max Facebook events",
+            "type": "integer",
+            "description": "Caps how many Facebook events are fetched, to control cost (apify/facebook-events-scraper runs at roughly $0.013 per event).",
+            "editor": "number",
+            "default": 50,
+            "minimum": 0
+        },
+        "subscriberEmail": {
+            "title": "Subscriber email (optional)",
+            "type": "string",
+            "description": "If set, a periodic email digest of newly found matching events is sent to this address via Resend.",
+            "editor": "textfield",
+            "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
+        },
+        "digestFrequency": {
+            "title": "Digest frequency",
+            "type": "string",
+            "description": "How often to send the email digest. The Actor can run more often than this (e.g. on a daily schedule) — it will only actually send once enough time has passed since the last send.",
+            "editor": "select",
+            "enum": ["daily", "weekly", "biweekly", "monthly"],
+            "enumTitles": ["Daily", "Weekly", "Every 2 weeks", "Monthly"],
+            "default": "weekly"
+        },
+        "resendApiKey": {
+            "title": "Resend API key (optional)",
+            "type": "string",
+            "description": "Required only if subscriberEmail is set. Get one at resend.com. Pass this as a secret input, never commit it.",
+            "editor": "textfield",
+            "isSecret": true
+        }
+    },
+    "required": ["city"]
+}
