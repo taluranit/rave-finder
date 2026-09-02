@@ -3,6 +3,7 @@ import { crawlAggregators } from './crawlers/aggregatorCrawler.js';
 import { crawlClubSites } from './crawlers/clubSiteCrawler.js';
 import { discoverClubSitesViaMaps } from './crawlers/mapsDiscoveryCrawler.js';
 import { crawlFacebookEvents } from './crawlers/facebookEventsCrawler.js';
+import { CLUB_SITES } from './sources/seedSources.js';
 import { geocode, haversineDistanceKm } from './geocode.js';
 import { dedupeEvents } from './dedupe.js';
 import { maybeSendDigest } from './email.js';
@@ -56,22 +57,28 @@ try {
         throw new Error(`Could not geocode city "${city}" — check the spelling and try again.`);
     }
 
-    // Gather candidate events from every source in parallel. Facebook is skipped entirely
-    // (no cost incurred) if includeFacebookEvents is false; Maps discovery is skipped if
-    // maxMapsVenues is 0. Maps discovery covers cities/venues outside the curated seed list —
-    // its found venues are crawled the same way as the seeded ones once discovered.
-    const [aggregatorEvents, seededClubEvents, mapsClubEvents, facebookEvents] = await Promise.all([
+    // Apify's concurrent-Actor-run cap is shared across the whole account (confirmed live:
+    // 5 total, including this Actor's own run). Aggregators run in-process (Crawlee's own
+    // CheerioCrawler, not a separate Actor call) so they're free to run alongside anything;
+    // Maps discovery and Facebook are each one Actor call, so running those two together
+    // with this run itself is 3 of the 5 slots — safe. Club sites are crawled *after* this
+    // resolves, not concurrently with it: two 5-wide crawl pools (seeded + Maps-discovered)
+    // running at the same time as Maps discovery and Facebook were blowing straight through
+    // the cap, and every club-site crawl failed outright as a result.
+    const [aggregatorEvents, mapsVenues, facebookEvents] = await Promise.all([
         crawlAggregators(),
-        crawlClubSites(),
-        discoverClubSitesViaMaps({ cityCoords, radiusKm, maxMapsVenues }).then((venues) => crawlClubSites(venues)),
+        discoverClubSitesViaMaps({ cityCoords, radiusKm, maxMapsVenues }),
         includeFacebookEvents ? crawlFacebookEvents({ genres, city, maxFacebookEvents }) : Promise.resolve([]),
     ]);
 
-    let candidates = [...aggregatorEvents, ...seededClubEvents, ...mapsClubEvents, ...facebookEvents];
+    // Seeded and Maps-discovered venues share one crawl pool (see CLUB_SITE_CONCURRENCY).
+    const clubEvents = await crawlClubSites([...CLUB_SITES, ...mapsVenues]);
+
+    let candidates = [...aggregatorEvents, ...clubEvents, ...facebookEvents];
     log.info(
         `Collected ${candidates.length} raw candidate event(s): ` +
-            `${aggregatorEvents.length} aggregator, ${seededClubEvents.length} seeded club, ` +
-            `${mapsClubEvents.length} Maps-discovered club, ${facebookEvents.length} Facebook.`,
+            `${aggregatorEvents.length} aggregator, ${clubEvents.length} club ` +
+            `(${CLUB_SITES.length} seeded + ${mapsVenues.length} Maps-discovered), ${facebookEvents.length} Facebook.`,
     );
 
     // Keep only events matching a requested genre (an event can match more than one).

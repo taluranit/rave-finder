@@ -5,7 +5,12 @@ import { mapWithConcurrency } from '../concurrency.js';
 
 const WEBSITE_CONTENT_CRAWLER_ACTOR_ID = 'apify/website-content-crawler';
 const MAX_CRAWL_PAGES_PER_SITE = 8; // club sites are small; a handful of pages covers the events/program page
-const CLUB_SITE_CONCURRENCY = 5; // sites are crawled independently — no reason to serialize 15 Actor calls
+// Confirmed live: Apify's concurrent-Actor-run cap is 5, shared across the whole account
+// including this Actor's own run. main.js runs this crawl after Maps discovery/Facebook have
+// already finished (not concurrently with them), so the only other slot in use is this
+// Actor's own run itself — leaving up to 4 free, but staying at 3 for a margin of safety
+// rather than running right at the ceiling.
+const CLUB_SITE_CONCURRENCY = 3;
 
 const DATE_ISO_RE = /\b(\d{4})-(\d{2})-(\d{2})\b/;
 const DATE_CZ_NUMERIC_RE = /\b(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4})\b/;
