@@ -68,18 +68,26 @@ try {
     ]);
 
     let candidates = [...aggregatorEvents, ...seededClubEvents, ...mapsClubEvents, ...facebookEvents];
-    log.info(`Collected ${candidates.length} raw candidate event(s) across all sources.`);
+    log.info(
+        `Collected ${candidates.length} raw candidate event(s): ` +
+            `${aggregatorEvents.length} aggregator, ${seededClubEvents.length} seeded club, ` +
+            `${mapsClubEvents.length} Maps-discovered club, ${facebookEvents.length} Facebook.`,
+    );
 
     // Keep only events matching a requested genre (an event can match more than one).
     candidates = candidates.filter((event) => event.genres.some((g) => genres.includes(g)));
+    log.info(`${candidates.length} remain after genre filtering (requested: ${genres.join(', ')}).`);
 
     // Keep only events within the requested date range.
     candidates = candidates.filter((event) => withinDateRange(event.date, dateRangeDays));
+    log.info(`${candidates.length} remain after date filtering (next ${dateRangeDays} day(s)).`);
 
     // Geocode each venue (cached) and filter by distance from the city center. Events whose
     // venue coordinates are already known (Maps-discovered venues carry their own lat/lon)
     // skip this — no point re-geocoding a place Google Maps already located precisely.
     const withDistance = [];
+    let uncodableCount = 0;
+    let tooFarCount = 0;
     for (const event of candidates) {
         let venueCoords = typeof event.lat === 'number' && typeof event.lon === 'number' ? { lat: event.lat, lon: event.lon } : null;
         if (!venueCoords) {
@@ -92,10 +100,16 @@ try {
             const query = withCountry(event.address ? `${event.address}, ${eventCity}` : `${event.venue}, ${eventCity}`);
             venueCoords = await geocode(query);
         }
-        if (!venueCoords) continue; // can't place it, can't filter it by radius — drop it
+        if (!venueCoords) {
+            uncodableCount += 1;
+            continue; // can't place it, can't filter it by radius — drop it
+        }
 
         const distanceKm = haversineDistanceKm(cityCoords, venueCoords);
-        if (distanceKm > radiusKm) continue;
+        if (distanceKm > radiusKm) {
+            tooFarCount += 1;
+            continue;
+        }
 
         withDistance.push({
             ...event,
@@ -106,12 +120,17 @@ try {
         });
     }
 
+    log.info(
+        `${withDistance.length} remain after geocoding + radius filtering (within ${radiusKm}km) — ` +
+            `dropped ${uncodableCount} unplaceable, ${tooFarCount} too far.`,
+    );
+
     // Dedupe across sources, preferring higher-confidence sources when the same event
     // appears more than once (sort so the highest-confidence copy is seen first and kept).
     withDistance.sort((a, b) => (CONFIDENCE_RANK[a.confidence] ?? 1) - (CONFIDENCE_RANK[b.confidence] ?? 1));
     const finalEvents = dedupeEvents(withDistance);
 
-    log.info(`${finalEvents.length} event(s) after genre/date/radius filtering and dedup.`);
+    log.info(`${finalEvents.length} event(s) after dedup — final result.`);
 
     await Actor.pushData(
         finalEvents.map((event) => ({
