@@ -43,7 +43,21 @@ Events. Optionally sends you a periodic email digest of newly found events.
      club-like venues near the geocoded city center, then crawls each discovered venue's
      website the same way as the seeded list. Capped by `maxMapsVenues`; set to `0` to
      disable.
-   - **Facebook Events** — via
+   - **Facebook venue pages** — the source that actually works for small towns, and **on by
+     default** (`includeFacebookVenuePages`). Rather than searching, it reads the events tab
+     of venues already established to be in range. Verified live against Rokáč: its own
+     website yielded nothing under the free `cheerio` crawler, while
+     `facebook.com/rokac.cz/upcoming_hosted_events` returned 15 events with dates *and*
+     coordinates. The plain page URL returns one empty record — the `/upcoming_hosted_events`
+     tab is the URL shape that works, and `startUrls` takes plain strings, not `{ url }`
+     objects (the Actor calls `url.match()` on each entry and crashes otherwise).
+     Cost scales with the number of nearby venues instead of with search noise.
+     Because a venue page publishes the venue's *whole* programme, events inherit the venue's
+     `trustedElectronic` (so a DJ night naming no genre survives) but are screened by a
+     non-music filter — a live run otherwise surfaced a wine-and-burčák tasting. The filter
+     drops tastings, workshops, yoga, tournaments and markets while deliberately keeping
+     anything that might be a DJ night.
+   - **Facebook Events search** — via
      [`apify/facebook-events-scraper`](https://apify.com/apify/facebook-events-scraper),
      searched by genre + the **towns Facebook actually indexes** near your search point (no
      hardcoded page list). **Off by default** (`includeFacebookEvents: false`) — see
@@ -220,6 +234,21 @@ Dockerfile                  apify/actor-node base image
   Experience (a satellite series at Nová Osmička in Frýdek-Místek) only survives because its
   listings mention specific DJs/genres — a bare artist-only listing wouldn't.
 - Scope is Czech Republic only.
+- **Two genre-specific party calendars are found but not wired up.**
+  [jiripetrak.cz](https://www.jiripetrak.cz/cs/drum-a-bass-a-techno-parties-kalendar-akci-44/)
+  (33 upcoming events when checked, Beats for Love among them) and
+  [dnbczevents.cz](https://dnbczevents.cz/akce.php) are dedicated D&B/techno listings — the
+  most on-target free sources found so far. They're parked in
+  `CANDIDATE_AGGREGATORS_NEEDING_CUSTOM_EXTRACTION` because the generic heuristic extractor
+  can't read them: it scans every dated `<a>`, and a live test pulled 886 "events" out of
+  dnbczevents.cz that were nav links, city names and DJ names. Junk candidates aren't just
+  untidy — each costs a geocoding call at 1 req/sec, so one misread page exhausts the run's
+  time budget. Enabling them needs per-site parsing against their real DOM. Highest-value
+  remaining work.
+- **Resident Advisor doesn't help outside Prague/Brno.** Its Czech coverage is
+  Prague-centric: of ~115 upcoming events, 105 are Prague, 3 Brno. For a search near a
+  smaller town it contributes candidates but no results — the nearest listing to Návsí was
+  Olomouc, ~100km out. Excellent for Prague or Brno searches, irrelevant for a village.
 - **GoOut is underused.** It's the largest Czech event source, and it does have a real public
   API — `https://goout.net/services/entities/v1/schedules` responds with structured schedules
   (dates, pricing, ticketing state) once you pass the required `languages[]` parameter. But
