@@ -1,6 +1,6 @@
 import { CheerioCrawler, log } from 'crawlee';
 import { AGGREGATOR_SITES } from '../sources/seedSources.js';
-import { classifyForInclusion, looksElectronic } from '../genreClassifier.js';
+import { classifyForInclusion, looksElectronic, stripGenreLabel } from '../genreClassifier.js';
 import { extractJsonLdEvents } from '../extractors/jsonLdEvents.js';
 import { extractEventCards } from '../extractors/eventCards.js';
 import { parseDate, stripDates } from '../extractors/dates.js';
@@ -159,6 +159,7 @@ export async function crawlAggregators() {
 
                 kept.push({
                     ...event,
+                    eventName: stripGenreLabel(event.eventName),
                     venue: event.venue || source.name,
                     genres,
                     sourceName: source.name,

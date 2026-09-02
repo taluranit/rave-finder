@@ -134,4 +134,23 @@ export function classifyForInclusion(title, { description = '', trustedElectroni
     return [];
 }
 
+/**
+ * Removes a trailing genre label from an event title, for display.
+ *
+ * Some venues append their own genre tagging to the title — fabric.cz publishes
+ * "New Season Rave | House • Techno" and "DGTL: Techno Ladies w/ CARLA ROCA | Techno". That
+ * suffix is useful signal and should be classified on, so this is meant to run *after*
+ * classifyForInclusion, purely to keep the stored title readable.
+ *
+ * Only strips a final segment made up entirely of genre words and separators, so a title that
+ * genuinely ends in "| Drum and Bass Special w/ Guests" keeps its words.
+ */
+const GENRE_LABEL_TAIL_RE = new RegExp(
+    `\\s*[|·–—]\\s*(?:(?:${[...Object.values(SPECIFIC_GENRE_KEYWORDS).flat(), 'electronic', 'electronica', 'elektronika', 'drum & bass', 'dnb'].map(escapeRegExp).join('|')})[\\s•,/&+·|-]*)+$`,
+    'i',
+);
+export function stripGenreLabel(title) {
+    return (title || '').replace(GENRE_LABEL_TAIL_RE, '').trim() || title;
+}
+
 export { SPECIFIC_GENRE_KEYWORDS as GENRE_KEYWORDS };

@@ -29,6 +29,15 @@ function withCountry(place) {
 }
 
 /**
+ * Trims a redundant country from a city value before it's stored. Facebook returns city as
+ * "Jablunkov, Czech Republic", which reads oddly next to a dedicated country-wide scope and
+ * makes the field inconsistent with every other source's bare town name.
+ */
+function cityLabel(city) {
+    return (city || '').replace(/,?\s*(czech republic|czechia|česká republika|cesko|česko)\s*$/i, '').trim();
+}
+
+/**
  * True if a venue could plausibly fall inside the search radius, so it's worth spending an
  * Actor call crawling it. Searching Návsí previously crawled Cross Club, Roxy, Ankali,
  * MeetFactory, Lucerna and the rest of the Prague/Brno seed list — ~350km away, one Actor
@@ -258,7 +267,7 @@ try {
             // being in "Návsí". The distance is right there in the same record contradicting
             // it, and a digest that says an event is in your village when it isn't is worse
             // than one that admits it doesn't know the town.
-            city: event.city || '',
+            city: cityLabel(event.city),
         });
     }
 

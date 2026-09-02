@@ -1,6 +1,6 @@
 import { CheerioCrawler, log } from 'crawlee';
 import { CLUB_SITES } from '../sources/seedSources.js';
-import { classifyForInclusion } from '../genreClassifier.js';
+import { classifyForInclusion, stripGenreLabel } from '../genreClassifier.js';
 import { extractJsonLdEvents } from '../extractors/jsonLdEvents.js';
 import { extractEventCards } from '../extractors/eventCards.js';
 
@@ -67,7 +67,9 @@ export async function crawlClubSites(sources = CLUB_SITES) {
                 if (genres.length === 0) continue; // no genre signal, and the venue isn't trusted electronic-only
 
                 kept.push({
-                    eventName: event.eventName,
+                    // Classified above on the full title, including any genre label; trimmed
+                    // only now, for a readable stored value.
+                    eventName: stripGenreLabel(event.eventName),
                     date: event.date,
                     venue: event.venue || source.name,
                     address: event.address || '',
