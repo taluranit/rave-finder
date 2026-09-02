@@ -2,7 +2,7 @@ import { Actor, log } from 'apify';
 import { crawlAggregators } from './crawlers/aggregatorCrawler.js';
 import { crawlClubSites } from './crawlers/clubSiteCrawler.js';
 import { discoverClubSitesViaMaps } from './crawlers/mapsDiscoveryCrawler.js';
-import { crawlFacebookEvents } from './crawlers/facebookEventsCrawler.js';
+import { crawlFacebookEvents, crawlFacebookVenuePages } from './crawlers/facebookEventsCrawler.js';
 import { crawlResidentAdvisor } from './crawlers/residentAdvisorCrawler.js';
 import { CLUB_SITES } from './sources/seedSources.js';
 import { findNearbyTowns } from './nearbyTowns.js';
@@ -16,6 +16,19 @@ const CONFIDENCE_RANK = { high: 0, moderate: 1, low: 2 };
 // city name geocodes to. Only applies to seeded venues, where all we know is the city —
 // Maps-discovered venues carry their own exact coordinates and are filtered strictly.
 const VENUE_CITY_SLACK_KM = 15;
+
+// The Actor's run timeout is a platform setting, not something actor.json can control, and
+// it defaults to 300s — a run that overshoots is aborted having pushed nothing at all. So
+// reserve the tail of the budget for the steps that actually produce output (remaining
+// geocoding, dedupe, pushData, the email digest) and stop starting new club-site crawls
+// once it's gone. Assumes the 300s default; harmless if the timeout has been raised, since
+// a fast run never reaches the deadline.
+const ASSUMED_RUN_TIMEOUT_MS = 300_000;
+const OUTPUT_RESERVE_MS = 75_000;
+
+// Wider than the Czech Republic is across, so any "city" resolving further than this is a
+// mis-geocode rather than a real place — see cityIsPlausiblyInRange.
+const IMPLAUSIBLE_CITY_DISTANCE_KM = 1000;
 
 // Appends ", Czech Republic" for Nominatim, unless the place already names the country —
 // e.g. a user typing "Návsí, Czech Republic" as the city input would otherwise end up
@@ -54,6 +67,9 @@ function withinDateRange(isoDate, dateRangeDays) {
     return date >= todayUtc && date <= rangeEnd;
 }
 
+const runStartedAt = Date.now();
+const clubCrawlDeadline = runStartedAt + ASSUMED_RUN_TIMEOUT_MS - OUTPUT_RESERVE_MS;
+
 await Actor.init();
 
 try {
@@ -64,6 +80,7 @@ try {
         genres = ['techno', 'house', 'drum_and_bass', 'electronic'],
         dateRangeDays = 30,
         includeFacebookEvents = false,
+        includeFacebookVenuePages = true,
         maxFacebookEvents = 20,
         maxMapsVenues = 5,
         subscriberEmail,
@@ -103,12 +120,10 @@ try {
         : [];
 
     // Phase 3 — club sites, one Actor call each, so only crawl venues that could actually be
-    // in range. Facebook pages are excluded outright: website-content-crawler in cheerio mode
-    // gets nothing useful from facebook.com (it needs JS and a session), and Maps discovery
-    // frequently returns a venue's Facebook page as its "website". Feeding those to
-    // facebook-events-scraper as startUrls would be the better use of them, but that Actor
-    // documents startUrls as event/search URLs rather than venue page URLs — unverified, so
-    // not wired up on a guess.
+    // in range. Facebook pages are excluded from *this* step: website-content-crawler in
+    // cheerio mode gets nothing useful from facebook.com (it needs JS and a session). Maps
+    // discovery frequently returns a venue's Facebook page as its "website", and those are
+    // routed to crawlFacebookVenuePages below instead, which is the right tool for them.
     const crawlableVenues = [...CLUB_SITES, ...mapsVenues.filter((v) => !/facebook\.com/i.test(v.url))];
     const inRangeVenues = [];
     for (const site of crawlableVenues) {
@@ -118,13 +133,30 @@ try {
         `Crawling ${inRangeVenues.length} of ${crawlableVenues.length} club site(s) — ` +
             `skipped ${crawlableVenues.length - inRangeVenues.length} too far from "${city}" to matter.`,
     );
-    const clubEvents = await crawlClubSites(inRangeVenues);
+    const clubEvents = await crawlClubSites(inRangeVenues, { deadline: clubCrawlDeadline });
 
-    let candidates = [...raEvents, ...aggregatorEvents, ...clubEvents, ...facebookEvents];
+    // Facebook events straight off in-range venues' own pages. Unlike Facebook *search*
+    // (off by default — see README), this is targeted: it only asks about venues already
+    // established to be nearby, and verified live to return dated events with coordinates.
+    // Sources are the seed list's verified facebookPage entries plus any Maps-discovered
+    // venue whose "website" is itself a Facebook page.
+    const venuePages = [
+        ...inRangeVenues.filter((v) => v.facebookPage).map((v) => ({ ...v, facebookPage: v.facebookPage })),
+        ...mapsVenues
+            .filter((v) => /facebook\.com/i.test(v.url))
+            .filter((v) => typeof v.lat !== 'number' || haversineDistanceKm(cityCoords, { lat: v.lat, lon: v.lon }) <= radiusKm)
+            .map((v) => ({ ...v, facebookPage: v.url })),
+    ];
+    const facebookVenueEvents = includeFacebookVenuePages
+        ? await crawlFacebookVenuePages({ venues: venuePages, maxFacebookEvents })
+        : [];
+
+    let candidates = [...raEvents, ...aggregatorEvents, ...clubEvents, ...facebookVenueEvents, ...facebookEvents];
     log.info(
         `Collected ${candidates.length} raw candidate event(s): ` +
             `${raEvents.length} Resident Advisor, ${aggregatorEvents.length} aggregator, ` +
-            `${clubEvents.length} club, ${facebookEvents.length} Facebook.`,
+            `${clubEvents.length} club site, ${facebookVenueEvents.length} Facebook venue page, ` +
+            `${facebookEvents.length} Facebook search.`,
     );
 
     // Keep only events matching a requested genre (an event can match more than one).
@@ -135,9 +167,52 @@ try {
     candidates = candidates.filter((event) => withinDateRange(event.date, dateRangeDays));
     log.info(`${candidates.length} remain after date filtering (next ${dateRangeDays} day(s)).`);
 
-    // Geocode each venue (cached) and filter by distance from the city center. Events whose
-    // venue coordinates are already known (Maps-discovered venues carry their own lat/lon)
-    // skip this — no point re-geocoding a place Google Maps already located precisely.
+    // Coarse pass first: drop whole cities before geocoding a single venue in them.
+    // Nominatim's usage policy caps us at 1 request/second, so per-venue geocoding is the
+    // dominant cost in the run's fixed time budget. Resident Advisor returns the whole
+    // country (105 of its ~114 Czech events are in Prague), and geocoding each of those
+    // individually burned ~110 seconds per run to then discard all of them for being 350km
+    // away. Geocoding "Prague" *once* rules out the lot. Same slack as the venue pre-filter,
+    // since a venue can sit out toward the edge of a large city.
+    const cityDistanceCache = new Map();
+    async function cityIsPlausiblyInRange(eventCity) {
+        if (!eventCity) return true; // no city to judge by — fall through to per-venue geocoding
+        if (!cityDistanceCache.has(eventCity)) {
+            const coords = await geocode(withCountry(eventCity));
+            cityDistanceCache.set(
+                eventCity,
+                coords ? haversineDistanceKm(cityCoords, coords) : null,
+            );
+        }
+        const distance = cityDistanceCache.get(eventCity);
+        if (distance === null) return true; // couldn't place the city — don't discard on that basis
+        // Sanity bound: this Actor's scope is one country, so a "city" that resolves further
+        // than IMPLAUSIBLE_CITY_DISTANCE_KM is a bad geocode rather than a real faraway city
+        // (a source once reported its country-wide area as a city literally named "All",
+        // which geocoded ~9,700km away). Don't drop events on the strength of that — let
+        // them through to be placed by their own venue address.
+        if (distance > IMPLAUSIBLE_CITY_DISTANCE_KM) {
+            log.warning(`Ignoring implausible city distance for "${eventCity}" (${Math.round(distance)}km) — placing those events by venue instead.`);
+            return true;
+        }
+        return distance <= radiusKm + VENUE_CITY_SLACK_KM;
+    }
+
+    const beforeCityFilter = candidates.length;
+    const cityFiltered = [];
+    for (const event of candidates) {
+        // Events that already carry exact coordinates skip this — they're judged directly.
+        const hasCoords = typeof event.lat === 'number' && typeof event.lon === 'number';
+        if (hasCoords || (await cityIsPlausiblyInRange(event.city))) cityFiltered.push(event);
+    }
+    candidates = cityFiltered;
+    log.info(
+        `${candidates.length} remain after city-level pre-filter ` +
+            `(dropped ${beforeCityFilter - candidates.length} in cities outside the radius, without geocoding each venue).`,
+    );
+
+    // Fine pass: geocode the remaining venues and filter precisely. Events whose venue
+    // coordinates are already known (Maps discovery, Facebook) skip this entirely.
     const withDistance = [];
     let uncodableCount = 0;
     let tooFarCount = 0;

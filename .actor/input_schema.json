@@ -47,6 +47,12 @@
             "description": "Search Facebook Events in addition to the other sources (uses the apify/facebook-events-scraper Actor, ~$0.013/event). Off by default: Facebook's event search OR-matches rather than filtering, so it reliably returns either global genre matches or every unrelated event in the town, and in live testing it surfaced no electronic events for the searched region while consuming most of the run's time and budget. Turn it on if you want to try it for a bigger city.",
             "default": false
         },
+        "includeFacebookVenuePages": {
+            "title": "Include Facebook events from nearby venue pages",
+            "type": "boolean",
+            "description": "Fetch events directly from the Facebook pages of venues already found to be in range, instead of using Facebook's event search. On by default: verified live that a venue page's events tab returns real dated events with coordinates, and cost scales with the number of nearby venues rather than with search noise. Shares the maxFacebookEvents cap.",
+            "default": true
+        },
         "maxFacebookEvents": {
             "title": "Max Facebook events",
             "type": "integer",

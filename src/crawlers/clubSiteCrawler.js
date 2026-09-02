@@ -147,13 +147,36 @@ export async function crawlOneClubSite(client, source) {
 /**
  * Crawls a list of club-like sites (defaults to the seeded CLUB_SITES, but also used for
  * dynamically Maps-discovered venues — see mapsDiscoveryCrawler.js).
+ *
+ * `deadline` exists because the Actor has a fixed wall-clock timeout and being killed
+ * mid-crawl means pushing *nothing* — no dataset, no digest — even though earlier sources
+ * already found events. Individual club-site crawls are the slowest and least reliable step
+ * (30–150s each, and a JS-rendered program page often yields nothing anyway), so they're the
+ * right thing to abandon when time runs short. Stopping early degrades coverage; running out
+ * of time loses the whole run.
+ *
  * @param {object[]} sources
+ * @param {object} [options]
+ * @param {number} [options.deadline] - epoch ms after which no new crawls are started.
  * @returns {Promise<object[]>}
  */
-export async function crawlClubSites(sources = CLUB_SITES) {
+export async function crawlClubSites(sources = CLUB_SITES, { deadline } = {}) {
     const client = Actor.newClient();
-    const perSiteEvents = await mapWithConcurrency(sources, CLUB_SITE_CONCURRENCY, (source) =>
-        crawlOneClubSite(client, source),
-    );
+    let skippedForTime = 0;
+
+    const perSiteEvents = await mapWithConcurrency(sources, CLUB_SITE_CONCURRENCY, (source) => {
+        if (deadline && Date.now() > deadline) {
+            skippedForTime += 1;
+            return [];
+        }
+        return crawlOneClubSite(client, source);
+    });
+
+    if (skippedForTime > 0) {
+        log.warning(
+            `Ran out of time budget: skipped ${skippedForTime} of ${sources.length} club site(s) so the run can still ` +
+                `publish what the other sources found. Raise the Actor's run timeout to crawl them all.`,
+        );
+    }
     return perSiteEvents.flat();
 }

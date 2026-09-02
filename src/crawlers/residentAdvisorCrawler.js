@@ -155,7 +155,14 @@ export async function crawlResidentAdvisor({ dateRangeDays }) {
                 date: event.date.slice(0, 10),
                 venue: event.venue?.name || '',
                 address: event.venue?.address || '',
-                city: event.venue?.area?.name || '',
+                // RA's area name is a real city for Prague/Brno, but country-wide events come
+                // back with the area literally named "All" — which is not a place. Emitting it
+                // as a city is actively harmful: geocoding "All, Czech Republic" resolves to
+                // somewhere ~9,700km away, so a city-level distance filter would discard every
+                // one of those events. Leave the city blank so they're placed by their own
+                // street address instead — and they're exactly the non-Prague events (České
+                // Budějovice, regional clubs) most likely to be near a smaller town.
+                city: event.venue?.area?.name === COUNTRY_WIDE_AREA_NAME ? '' : event.venue?.area?.name || '',
                 description: [raGenreNames.join(', '), artistNames.join(', ')].filter(Boolean).join(' — '),
                 genres,
                 sourceName: 'Resident Advisor',

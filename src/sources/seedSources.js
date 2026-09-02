@@ -33,7 +33,11 @@ export const CLUB_SITES = [
     { name: 'Fabric', city: 'Ostrava', url: 'https://www.fabricat.cz', genreFocus: ['techno'], confidence: 'high', trustedElectronic: true },
     // Confirmed live (self-describes as "LIVE & ELECTRONIC CLUB") while investigating a
     // Jablunkov/Návsí-area gap in coverage.
-    { name: 'Rokáč (Rock Café Jablunkov)', city: 'Jablunkov', url: 'https://rokac.cz', genreFocus: ['techno', 'house', 'drum_and_bass'], confidence: 'high', trustedElectronic: true },
+    // facebookPage is set only where it's been verified to return events — see
+    // crawlFacebookVenuePages. For this venue the page's events tab returned 3 real dated
+    // events with coordinates, while its website yielded nothing under the free cheerio
+    // crawler, so Facebook is the better source for it.
+    { name: 'Rokáč (Rock Café Jablunkov)', city: 'Jablunkov', url: 'https://rokac.cz', facebookPage: 'https://www.facebook.com/rokac.cz', genreFocus: ['techno', 'house', 'drum_and_bass'], confidence: 'high', trustedElectronic: true },
 
     // Moderate/low genre-focus confidence — mixed programming, so genre inclusion still
     // requires the broadened keyword/DJ signal rather than being trusted outright.

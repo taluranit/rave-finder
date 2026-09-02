@@ -88,11 +88,109 @@ export async function crawlFacebookEvents({ genres, city, searchCities = [], max
         });
     }
 
-    // Requiring real coordinates (not just a date) matters specifically here: Facebook's
-    // search isn't location-scoped (see README) and returns plenty of international results,
-    // so an event with no location.latitude/longitude would otherwise fall through to
-    // main.js's string-based geocode fallback — which for an event with no real city either
-    // ends up geocoding just the input city itself, i.e. an unrelated event "passing" the
-    // radius filter at ~0km away. Safer to drop it than risk a false-positive location.
+    return keepPlaceableEvents(results);
+}
+
+/**
+ * Fetches events straight off known venues' Facebook pages, rather than going through
+ * Facebook's event search.
+ *
+ * This is the source that actually works for small towns. Verified live against Rokáč
+ * (Jablunkov, ~2km from Návsí):
+ *   - `facebook.com/rokac.cz`                        -> one empty record, useless
+ *   - `facebook.com/rokac.cz/upcoming_hosted_events` -> 3 real events, with dates AND
+ *                                                       venue coordinates
+ * So the page's events tab is the URL shape to use. `startUrls` also takes plain strings,
+ * not `{ url }` objects — the Actor calls `url.match()` on each entry directly and crashes
+ * with "url.match is not a function" otherwise.
+ *
+ * Unlike the search path, cost here scales with the number of nearby venues rather than with
+ * how much unrelated stuff Facebook's index returns, and every event comes pre-attached to a
+ * venue we already decided was in range.
+ *
+ * @param {object} params
+ * @param {Array<{name: string, facebookPage: string, confidence?: string, trustedElectronic?: boolean}>} params.venues
+ * @param {number} params.maxFacebookEvents
+ * @returns {Promise<object[]>}
+ */
+export async function crawlFacebookVenuePages({ venues, maxFacebookEvents }) {
+    if (maxFacebookEvents <= 0 || venues.length === 0) return [];
+
+    // Map each venue page to its events tab, keeping track of which venue each URL came from
+    // so the resulting events can inherit that venue's trust level.
+    const venueByUrl = new Map();
+    for (const venue of venues) {
+        const pageUrl = venue.facebookPage.replace(/\/+$/, '');
+        venueByUrl.set(`${pageUrl}/upcoming_hosted_events`, venue);
+    }
+    const startUrls = [...venueByUrl.keys()];
+
+    log.info(`Fetching Facebook events for ${startUrls.length} nearby venue page(s) (cap ${maxFacebookEvents}).`);
+
+    const client = Actor.newClient();
+    let run;
+    try {
+        run = await client.actor(FACEBOOK_EVENTS_SCRAPER_ACTOR_ID).call({
+            startUrls,
+            maxEvents: maxFacebookEvents,
+        });
+    } catch (err) {
+        log.warning(`facebook-events-scraper (venue pages) run failed: ${err.message}`);
+        return [];
+    }
+
+    const { items } = await client.dataset(run.defaultDatasetId).listItems({ limit: maxFacebookEvents });
+
+    const results = [];
+    for (const item of items) {
+        const eventName = item.name || '';
+        if (!eventName) continue; // a page with no upcoming events yields one empty record
+        const description = item.description || '';
+
+        // Which venue's page produced this? Fall back to trusting nothing if it can't be
+        // matched, so an unattributable event still has to prove it's electronic on its own.
+        const venue = venueByUrl.get(item.inputUrl) ?? [...venueByUrl.values()].find((v) => v.name === item.location?.name);
+
+        const genres = classifyForInclusion(`${eventName} ${description}`, {
+            // An event on a known electronic venue's own page inherits that venue's trust —
+            // the same reasoning as trustedElectronic for seeded club sites. It's what lets a
+            // DJ night whose title names no genre survive. It does also let the venue's
+            // non-electronic nights through (Rokáč runs wine tastings and pizza Sundays), which
+            // is the accepted trade-off for not missing the actual parties.
+            trustedElectronic: Boolean(venue?.trustedElectronic),
+        });
+        if (genres.length === 0) continue;
+
+        results.push({
+            eventName,
+            date: item.utcStartDate ? item.utcStartDate.slice(0, 10) : null,
+            venue: item.location?.name || venue?.name || '',
+            address: item.location?.streetAddress || '',
+            city: item.location?.city || '',
+            lat: item.location?.latitude,
+            lon: item.location?.longitude,
+            description,
+            genres,
+            sourceName: `Facebook — ${venue?.name || item.location?.name || 'venue page'}`,
+            sourceUrl: item.url || '',
+            confidence: venue?.confidence || 'moderate',
+        });
+    }
+
+    log.info(`Facebook venue pages: ${results.length} event(s) kept.`);
+    return keepPlaceableEvents(results);
+}
+
+/**
+ * Drops events that can't be placed on a map.
+ *
+ * Requiring real coordinates (not just a date) matters specifically here: Facebook's search
+ * isn't location-scoped (see README) and returns plenty of international results, so an event
+ * with no location.latitude/longitude would otherwise fall through to main.js's string-based
+ * geocode fallback — which for an event with no real city either ends up geocoding just the
+ * input city itself, i.e. an unrelated event "passing" the radius filter at ~0km away. Safer
+ * to drop it than risk a false-positive location.
+ */
+function keepPlaceableEvents(results) {
     return results.filter((e) => e.date && typeof e.lat === 'number' && typeof e.lon === 'number');
 }
