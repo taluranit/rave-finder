@@ -2,18 +2,17 @@
     "actorSpecification": 1,
     "name": "rave-finder",
     "title": "Rave Finder",
-    "description": "Finds upcoming techno, house, and drum & bass events near a Czech city within a chosen radius, pulling from club websites, event aggregators, and Facebook Events. Optionally emails a periodic digest of newly found events.",
+    "description": "Finds upcoming electronic music and DJ events near a Czech city within a chosen radius, pulling from Resident Advisor, event aggregators, club websites, and Facebook Events. Optionally emails a periodic digest of newly found events.",
     "version": "0.1",
     "buildTag": "latest",
+    "meta": {
+        "generatedBy": "Claude Code with Claude Opus 4.5"
+    },
     "input": "./input_schema.json",
     "output": "./output_schema.json",
     "storages": {
         "dataset": "./dataset_schema.json",
         "keyValueStore": "./key_value_store_schema.json"
     },
-    "dockerfile": "../Dockerfile",
-    "defaultRunOptions": {
-        "memoryMbytes": 1024,
-        "timeoutSecs": 3600
-    }
+    "dockerfile": "../Dockerfile"
 }

@@ -107,6 +107,13 @@ aggregator crawl cost **zero** Actor slots, which is a large part of why RA is t
 source. Each `website-content-crawler` call is also pinned to 512MB rather than its 8192MB
 default.
 
+**Run timeout must be set on the Actor, not here.** `defaultRunOptions` is *not* a valid
+`actor.json` property (see Apify's actor.json reference) — putting it there is silently
+ignored, which cost one run an abort at the platform default of 300 seconds. Set the timeout
+in Apify Console under the Actor's Settings → Run options, or per-run under Input → Run
+options. A full run needs well over 300s: Facebook alone can spend several minutes, and
+geocoding is rate-limited to 1 request/second by Nominatim's usage policy.
+
 ## Input
 
 | Field | Type | Default | Description |
@@ -116,7 +123,7 @@ default.
 | `genres` | array | all four | `techno`, `house`, `drum_and_bass`, `electronic` (generic — electronic/DJ events with no specific genre named). |
 | `dateRangeDays` | integer | `30` | Only include events within this many days from now (1–180). |
 | `includeFacebookEvents` | boolean | `true` | Also search Facebook Events. |
-| `maxFacebookEvents` | integer | `50` | Caps Facebook events fetched, to control cost. |
+| `maxFacebookEvents` | integer | `20` | Caps Facebook events fetched, to control cost. |
 | `maxMapsVenues` | integer | `5` | Caps Maps-discovered venues per search term, to control cost; `0` disables Maps discovery. Low by default — each discovered venue costs an Actor call, and most Maps hits are dance schools and bars, not electronic venues. |
 | `subscriberEmail` | string | *(none)* | If set, enables the email digest (see below). |
 | `digestFrequency` | enum | `weekly` | `daily` / `weekly` / `biweekly` / `monthly`. |

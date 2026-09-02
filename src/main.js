@@ -64,7 +64,7 @@ try {
         genres = ['techno', 'house', 'drum_and_bass', 'electronic'],
         dateRangeDays = 30,
         includeFacebookEvents = true,
-        maxFacebookEvents = 50,
+        maxFacebookEvents = 20,
         maxMapsVenues = 5,
         subscriberEmail,
         digestFrequency = 'weekly',

@@ -10,9 +10,11 @@ import { log } from 'apify';
  * within 50km this returns Ostrava (280k), Žilina, Havířov, Frýdek-Místek, Karviná, Třinec —
  * all places Facebook does index, and where the region's events are actually listed.
  *
- * Note this legitimately crosses borders near a tripoint like Návsí (Polish and Slovak towns
- * come back too), which is correct for a radius search — the radius filter later still
- * applies to each event's own venue coordinates.
+ * Restricted to Czechia, matching this Actor's v1 scope. Near a tripoint like Návsí an
+ * unrestricted radius query is dominated by Polish and Slovak towns — Bielsko-Biała and
+ * Jastrzębie-Zdrój outrank Frýdek-Místek on population and pushed the actual regional hub
+ * out of the list entirely, while adding paid Facebook queries for towns whose events aren't
+ * what's being looked for. Drop the country filter if the scope ever widens.
  */
 
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
@@ -20,6 +22,7 @@ const TIMEOUT_SECS = 25;
 // Overpass rejects requests without a User-Agent with HTTP 406 (confirmed live), and its
 // usage policy asks for a descriptive one — same as Nominatim.
 const USER_AGENT = 'RaveFinder/0.1 (Apify Actor; contact via apify.com store page)';
+const COUNTRY_CODE = 'CZ'; // v1 scope; see the note above about tripoint regions
 
 /**
  * @param {object} params
@@ -28,12 +31,14 @@ const USER_AGENT = 'RaveFinder/0.1 (Apify Actor; contact via apify.com store pag
  * @param {number} [params.limit] - how many towns to return, largest first by population.
  * @returns {Promise<string[]>} town names, most populous first
  */
-export async function findNearbyTowns({ center, radiusKm, limit = 6 }) {
+export async function findNearbyTowns({ center, radiusKm, limit = 4 }) {
     // Overpass wants metres. Sorting by population happens client-side: the `population` tag
     // is present on most sizeable places but not all, so places without it sort last rather
     // than being dropped.
     const query = `[out:json][timeout:${TIMEOUT_SECS}];`
-        + `node["place"~"^(city|town)$"](around:${Math.round(radiusKm * 1000)},${center.lat},${center.lon});`
+        + `area["ISO3166-1"="${COUNTRY_CODE}"][admin_level=2]->.country;`
+        + `node["place"~"^(city|town)$"](area.country)`
+        + `(around:${Math.round(radiusKm * 1000)},${center.lat},${center.lon});`
         + `out body 60;`;
 
     let elements;

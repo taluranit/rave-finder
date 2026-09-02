@@ -50,9 +50,9 @@
         "maxFacebookEvents": {
             "title": "Max Facebook events",
             "type": "integer",
-            "description": "Caps how many Facebook events are fetched, to control cost (apify/facebook-events-scraper runs at roughly $0.013 per event).",
+            "description": "Caps how many Facebook events are fetched, to control cost (apify/facebook-events-scraper runs at roughly $0.013 per event). Kept low: Facebook's event search OR-matches, so a query like \"drum and bass Havířov\" also returns every unrelated event in that town — yoga classes, board-game nights — each of which costs the same per-event fee before this Actor's genre filter discards it.",
             "editor": "number",
-            "default": 50,
+            "default": 20,
             "minimum": 0
         },
         "maxMapsVenues": {
