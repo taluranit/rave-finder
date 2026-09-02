@@ -2,6 +2,10 @@ import { CheerioCrawler, log } from 'crawlee';
 import { AGGREGATOR_SITES } from '../sources/seedSources.js';
 import { classifyForInclusion, looksElectronic } from '../genreClassifier.js';
 
+// Any single listing page producing more than this is misreading the page — see the check
+// in the request handler.
+const MAX_EVENTS_PER_AGGREGATOR = 120;
+
 const DATE_ISO_RE = /\b(\d{4})-(\d{2})-(\d{2})\b/;
 const DATE_CZ_RE = /\b(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4})\b/; // e.g. "12. 4. 2026" or "12.4.2026"
 
@@ -116,13 +120,17 @@ export async function crawlAggregators() {
                 events = extractHeuristicEvents($, source);
             }
 
+            // Collected per source rather than pushed straight into `results`: handlers run
+            // concurrently, so the cap below has to be able to discard this page's events
+            // without touching anything another source has already contributed.
+            const kept = [];
             for (const event of events) {
                 const genres = source.forcedGenre
                     ? [source.forcedGenre]
                     : classifyForInclusion(`${event.eventName} ${event.description}`, { trustedElectronic: source.trustedElectronic });
                 if (genres.length === 0) continue; // not an electronic-music event we can tag
 
-                results.push({
+                kept.push({
                     ...event,
                     genres,
                     sourceName: source.name,
@@ -130,7 +138,21 @@ export async function crawlAggregators() {
                 });
             }
 
-            log.info(`${source.name}: found ${events.length} raw event(s), ${results.length} total electronic so far.`);
+            // A single listing page yielding more than this is misextraction, not a bumper
+            // month: the heuristic extractor scans every dated <a>, and one source produced
+            // 886 "events" that were nav links, city names and DJ names. Junk candidates cost
+            // a geocoding call each at Nominatim's 1 req/sec, so left unchecked a single
+            // misread page exhausts the whole run's time budget.
+            if (kept.length > MAX_EVENTS_PER_AGGREGATOR) {
+                log.warning(
+                    `${source.name}: extracted ${kept.length} events, over the ${MAX_EVENTS_PER_AGGREGATOR} ` +
+                        `sanity cap — treating this as misextraction and dropping them all. Needs per-site parsing.`,
+                );
+                return;
+            }
+
+            results.push(...kept);
+            log.info(`${source.name}: found ${events.length} raw event(s), kept ${kept.length}; ${results.length} total so far.`);
         },
     });
 

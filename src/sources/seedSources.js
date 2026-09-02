@@ -69,6 +69,48 @@ export const AGGREGATOR_SITES = [
     { name: 'Rave.cz', url: 'https://rave.cz', listingUrl: 'https://rave.cz/partylist', confidence: 'high', trustedElectronic: true },
 ];
 
+/**
+ * Genre-specific Czech party calendars — the most on-target free sources found so far, and
+ * deliberately NOT enabled yet.
+ *
+ * Both are dedicated D&B/techno listings rather than general culture portals, and both are
+ * server-rendered plain HTML (jiripetrak.cz showed 33 upcoming events when checked, Beats
+ * for Love among them). Note jiripetrak.cz was originally dismissed as a "personal page";
+ * that was a misread — it's a genre party calendar.
+ *
+ * They're parked here because the generic heuristic extractor cannot read them: it scans
+ * every dated <a> on a page, so a live test produced 886 "events" from dnbczevents.cz that
+ * were actually nav links, city names and DJ names ("← Zpátky na hlavní stranu", "Praha",
+ * "EmZee"). Junk candidates aren't merely untidy — each one costs a geocoding call at
+ * Nominatim's 1 req/sec, which on its own would exhaust the run's time budget.
+ *
+ * Enabling these needs per-site extraction against their actual DOM, not the generic
+ * fallback. High value when done: they list exactly the events this Actor exists to find.
+ */
+export const CANDIDATE_AGGREGATORS_NEEDING_CUSTOM_EXTRACTION = [
+    { name: 'Jiří Petrák D&B/Techno calendar', listingUrl: 'https://www.jiripetrak.cz/cs/drum-a-bass-a-techno-parties-kalendar-akci-44/' },
+    { name: 'DNB CZ Events', listingUrl: 'https://dnbczevents.cz/akce.php' },
+];
+
+/**
+ * Venues and promoters that publish to Facebook rather than to a crawlable website.
+ *
+ * These exist because Facebook venue pages turned out to be the only source that reliably
+ * finds events near a small town: Rokáč's own website yielded nothing under the free cheerio
+ * crawler while its Facebook page returned 15 events. Entries have no `url` — there's nothing
+ * to web-crawl — so they're only ever used by crawlFacebookVenuePages, and the `city` is what
+ * the distance pre-filter uses to decide whether they're worth asking about.
+ *
+ * Researched rather than live-tested individually; a single run validates the whole batch,
+ * since one Actor call takes all the page URLs at once.
+ */
+export const FACEBOOK_VENUE_PAGES = [
+    { name: 'TESLA Production', city: 'Třinec', facebookPage: 'https://www.facebook.com/TeslaTrinec', confidence: 'moderate', trustedElectronic: true },
+    { name: 'PartyTime Frýdek-Místek', city: 'Frýdek-Místek', facebookPage: 'https://www.facebook.com/partytimefm', confidence: 'moderate', trustedElectronic: true },
+    { name: 'Project Bar', city: 'Ostrava', facebookPage: 'https://www.facebook.com/projectmusicbar', confidence: 'moderate', trustedElectronic: true },
+    { name: 'DNB pro Ostravaky', city: 'Ostrava', facebookPage: 'https://www.facebook.com/DNBproOSTRAVAKY', confidence: 'moderate', trustedElectronic: true },
+];
+
 // Explicitly excluded per v1 scope decision: too low-signal for reliable event extraction
 // (KudyZNudy, Kultura365 are general tourism/culture aggregators; personal pages are
 // one-off and not worth a dedicated crawler).

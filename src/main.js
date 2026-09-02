@@ -4,7 +4,7 @@ import { crawlClubSites } from './crawlers/clubSiteCrawler.js';
 import { discoverClubSitesViaMaps } from './crawlers/mapsDiscoveryCrawler.js';
 import { crawlFacebookEvents, crawlFacebookVenuePages } from './crawlers/facebookEventsCrawler.js';
 import { crawlResidentAdvisor } from './crawlers/residentAdvisorCrawler.js';
-import { CLUB_SITES } from './sources/seedSources.js';
+import { CLUB_SITES, FACEBOOK_VENUE_PAGES } from './sources/seedSources.js';
 import { findNearbyTowns } from './nearbyTowns.js';
 import { geocode, haversineDistanceKm } from './geocode.js';
 import { dedupeEvents } from './dedupe.js';
@@ -124,16 +124,24 @@ try {
     // cheerio mode gets nothing useful from facebook.com (it needs JS and a session). Maps
     // discovery frequently returns a venue's Facebook page as its "website", and those are
     // routed to crawlFacebookVenuePages below instead, which is the right tool for them.
-    const crawlableVenues = [...CLUB_SITES, ...mapsVenues.filter((v) => !/facebook\.com/i.test(v.url))];
+    // Distance-filter every known venue first — seeded sites, Facebook-only venues, and
+    // Maps discoveries alike — then split by what can actually be fetched from each.
+    const knownVenues = [
+        ...CLUB_SITES,
+        ...FACEBOOK_VENUE_PAGES,
+        ...mapsVenues.filter((v) => !/facebook\.com/i.test(v.url)),
+    ];
     const inRangeVenues = [];
-    for (const site of crawlableVenues) {
+    for (const site of knownVenues) {
         if (await venueCouldBeInRange(site, cityCoords, radiusKm)) inRangeVenues.push(site);
     }
+    // Only entries with a website can be web-crawled; Facebook-only venues have no `url`.
+    const crawlableVenues = inRangeVenues.filter((v) => v.url);
     log.info(
-        `Crawling ${inRangeVenues.length} of ${crawlableVenues.length} club site(s) — ` +
-            `skipped ${crawlableVenues.length - inRangeVenues.length} too far from "${city}" to matter.`,
+        `${inRangeVenues.length} of ${knownVenues.length} known venue(s) in range of "${city}" — ` +
+            `${crawlableVenues.length} with a crawlable website.`,
     );
-    const clubEvents = await crawlClubSites(inRangeVenues, { deadline: clubCrawlDeadline });
+    const clubEvents = await crawlClubSites(crawlableVenues, { deadline: clubCrawlDeadline });
 
     // Facebook events straight off in-range venues' own pages. Unlike Facebook *search*
     // (off by default — see README), this is targeted: it only asks about venues already

@@ -3,6 +3,15 @@ import { classifyForInclusion } from '../genreClassifier.js';
 
 const FACEBOOK_EVENTS_SCRAPER_ACTOR_ID = 'UZBnerCFBo5FgGouO'; // apify/facebook-events-scraper
 
+// A venue's own Facebook page publishes its entire programme, not just its club nights, so
+// inheriting the venue's "this place is electronic" trust wholesale lets plainly non-musical
+// events through — a live Návsí run returned a wine-and-burčák tasting from Rokáč alongside
+// its DJ nights. This drops the obvious non-music categories while deliberately keeping
+// anything that could be a DJ night: an "80s/90s hits" evening or a themed Sunday with a
+// named DJ has no genre keyword but is still a party.
+const NON_MUSIC_EVENT_RE =
+    /\b(degustac|ochutn[áa]vk|tasting|workshop|kurz|p[řr]edn[áa]šk|semin[áa][řr]|besed|quiz|kv[íi]z|turnaj|z[áa]vod|jarmark|trh\b|bazar|swap|v[ýy]stav|exhibition|divadl|theatre|kino\b|cinema|j[óo]g|yoga|pilates|tr[ée]nink|training|prohl[íi]dk|porod|koj[ée]n[íi]|pro d[ěe]ti|d[ěe]tsk|bl[ée]ší)/i;
+
 // Representative search keyword per genre, combined with the city (e.g. "techno Brno").
 const GENRE_SEARCH_KEYWORDS = {
     techno: 'techno',
@@ -142,10 +151,16 @@ export async function crawlFacebookVenuePages({ venues, maxFacebookEvents }) {
     const { items } = await client.dataset(run.defaultDatasetId).listItems({ limit: maxFacebookEvents });
 
     const results = [];
+    let nonMusicSkipped = 0;
     for (const item of items) {
         const eventName = item.name || '';
         if (!eventName) continue; // a page with no upcoming events yields one empty record
         const description = item.description || '';
+
+        if (NON_MUSIC_EVENT_RE.test(eventName)) {
+            nonMusicSkipped += 1;
+            continue;
+        }
 
         // Which venue's page produced this? Fall back to trusting nothing if it can't be
         // matched, so an unattributable event still has to prove it's electronic on its own.
@@ -177,7 +192,7 @@ export async function crawlFacebookVenuePages({ venues, maxFacebookEvents }) {
         });
     }
 
-    log.info(`Facebook venue pages: ${results.length} event(s) kept.`);
+    log.info(`Facebook venue pages: ${results.length} event(s) kept, ${nonMusicSkipped} skipped as clearly non-music.`);
     return keepPlaceableEvents(results);
 }
 
