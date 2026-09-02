@@ -6,6 +6,11 @@
     "version": "0.1",
     "buildTag": "latest",
     "input": "./input_schema.json",
+    "output": "./output_schema.json",
+    "storages": {
+        "dataset": "./dataset_schema.json",
+        "keyValueStore": "./key_value_store_schema.json"
+    },
     "dockerfile": "../Dockerfile",
     "defaultRunOptions": {
         "memoryMbytes": 1024,

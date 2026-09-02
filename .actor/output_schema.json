@@ -1,0 +1,19 @@
+{
+    "actorOutputSchemaVersion": 1,
+    "title": "Matching events",
+    "description": "Upcoming electronic music and DJ events near the searched city, deduplicated across sources and filtered by genre, date range, and radius.",
+    "properties": {
+        "dataset": {
+            "type": "string",
+            "title": "Events",
+            "description": "Dataset containing every matching event found",
+            "template": "{{links.apiDefaultDatasetUrl}}/items"
+        },
+        "state": {
+            "type": "string",
+            "title": "Run state",
+            "description": "Key-value store holding the geocode cache and email digest history",
+            "template": "{{links.apiDefaultKeyValueStoreUrl}}/keys"
+        }
+    }
+}

@@ -1,0 +1,19 @@
+{
+    "actorKeyValueStoreSchemaVersion": 1,
+    "title": "Run state",
+    "description": "Internal state the Actor carries between runs: cached geocoding results and email digest send history.",
+    "collections": {
+        "geocodeCache": {
+            "title": "Geocode cache",
+            "description": "Place name/address to coordinates, cached so repeat runs don't re-query Nominatim for places already resolved. Only successful lookups are cached — a failed one is retried next run rather than replaying the failure forever.",
+            "key": "GEOCODE_CACHE",
+            "contentTypes": ["application/json"]
+        },
+        "digestState": {
+            "title": "Email digest state",
+            "description": "Per-subscriber (hashed email) last-sent timestamp and fingerprints of already-sent events, so a frequently-scheduled run only actually emails once the chosen digest frequency has elapsed, and never repeats an event.",
+            "key": "DIGEST_STATE",
+            "contentTypes": ["application/json"]
+        }
+    }
+}

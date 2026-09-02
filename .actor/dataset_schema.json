@@ -1,0 +1,153 @@
+{
+    "actorSpecification": 1,
+    "fields": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+            "eventName": {
+                "type": "string",
+                "description": "Name of the event as listed by the source.",
+                "nullable": true,
+                "example": "Techno Night w/ Example Artist"
+            },
+            "date": {
+                "type": "string",
+                "description": "Event date in ISO format (YYYY-MM-DD). Time of day is not captured — sources report it too inconsistently to be reliable.",
+                "nullable": true,
+                "example": "2026-09-19"
+            },
+            "venue": {
+                "type": "string",
+                "description": "Venue hosting the event. For heuristically-parsed club sites this falls back to the venue whose site was crawled.",
+                "nullable": true,
+                "example": "Example Club"
+            },
+            "address": {
+                "type": "string",
+                "description": "Street address of the venue, when the source provides one. Often empty — many sources list only a venue name.",
+                "nullable": true,
+                "example": "Example Street 1"
+            },
+            "city": {
+                "type": "string",
+                "description": "City of the venue. Falls back to the searched city when the source doesn't state one.",
+                "nullable": true,
+                "example": "Brno"
+            },
+            "lat": {
+                "type": "number",
+                "description": "Latitude of the venue, either from the source directly (Google Maps, Facebook) or from geocoding its name/address.",
+                "nullable": true,
+                "example": 49.1951
+            },
+            "lon": {
+                "type": "number",
+                "description": "Longitude of the venue, either from the source directly (Google Maps, Facebook) or from geocoding its name/address.",
+                "nullable": true,
+                "example": 16.6068
+            },
+            "distanceKm": {
+                "type": "number",
+                "description": "Great-circle distance from the searched city center to the venue, in kilometers, rounded to one decimal place.",
+                "nullable": true,
+                "example": 12.4
+            },
+            "genres": {
+                "type": "array",
+                "description": "Genres matched for this event. Specific genres come from keyword matching or a source's own genre tag; the generic \"electronic\" tag means the event is electronic/DJ music but names no specific genre.",
+                "items": {
+                    "type": "string"
+                },
+                "nullable": true,
+                "example": ["techno", "house"]
+            },
+            "sourceName": {
+                "type": "string",
+                "description": "Which source this event was found on — an aggregator name, a club/venue name, or \"Facebook Events\".",
+                "nullable": true,
+                "example": "Rave.cz"
+            },
+            "sourceUrl": {
+                "type": "string",
+                "description": "Link back to the event on its source, for verifying details the extraction may have missed.",
+                "nullable": true,
+                "example": "https://example.com/events/12345"
+            },
+            "description": {
+                "type": "string",
+                "description": "Event description, when the source provides one. Empty for heuristically-parsed listings, which yield only a title and date.",
+                "nullable": true,
+                "example": "This is an example event description."
+            },
+            "confidence": {
+                "type": "string",
+                "description": "How reliable this event's data is expected to be, inherited from its source: \"high\" for curated electronic-only sources, down to \"low\" for mixed-programming venues and heuristic matches.",
+                "enum": ["high", "moderate", "low"],
+                "nullable": true,
+                "example": "high"
+            }
+        },
+        "required": [],
+        "additionalProperties": true
+    },
+    "views": {
+        "overview": {
+            "title": "Overview",
+            "description": "Most important fields at a glance",
+            "transformation": {
+                "fields": [
+                    "eventName",
+                    "date",
+                    "venue",
+                    "city",
+                    "distanceKm",
+                    "genres",
+                    "sourceName",
+                    "sourceUrl",
+                    "confidence"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "eventName": {
+                        "label": "Event",
+                        "format": "text"
+                    },
+                    "date": {
+                        "label": "Date",
+                        "format": "text"
+                    },
+                    "venue": {
+                        "label": "Venue",
+                        "format": "text"
+                    },
+                    "city": {
+                        "label": "City",
+                        "format": "text"
+                    },
+                    "distanceKm": {
+                        "label": "Distance (km)",
+                        "format": "number"
+                    },
+                    "genres": {
+                        "label": "Genres",
+                        "format": "array"
+                    },
+                    "sourceName": {
+                        "label": "Source",
+                        "format": "text"
+                    },
+                    "sourceUrl": {
+                        "label": "Link",
+                        "format": "link"
+                    },
+                    "confidence": {
+                        "label": "Confidence",
+                        "format": "text"
+                    }
+                }
+            }
+        }
+    }
+}
