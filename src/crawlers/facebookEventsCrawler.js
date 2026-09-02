@@ -1,7 +1,12 @@
 import { Actor, log } from 'apify';
 import { classifyForInclusion } from '../genreClassifier.js';
+import { mapWithConcurrency } from '../concurrency.js';
 
 const FACEBOOK_EVENTS_SCRAPER_ACTOR_ID = 'UZBnerCFBo5FgGouO'; // apify/facebook-events-scraper
+
+// One Actor call per venue page, so this shares the account-wide concurrent-run cap of 5 —
+// see the phase notes in main.js. Kept below it, and these run after the club-site crawls.
+const VENUE_PAGE_CONCURRENCY = 3;
 
 // A venue's own Facebook page publishes its entire programme, not just its club nights, so
 // inheriting the venue's "this place is electronic" trust wholesale lets plainly non-musical
@@ -134,25 +139,38 @@ export async function crawlFacebookVenuePages({ venues, maxFacebookEvents }) {
     }
     const startUrls = [...venueByUrl.keys()];
 
-    log.info(`Fetching Facebook events for ${startUrls.length} nearby venue page(s) (cap ${maxFacebookEvents}).`);
+    // One Actor call per page, rather than one call for all of them. The Actor's maxEvents is
+    // a whole-run total, so a single call lets whichever page it crawls first swallow the
+    // entire budget: a live run with 6 pages and a cap of 20 returned 16 events that were all
+    // from one venue, and the other five contributed nothing. Splitting the same total budget
+    // per page keeps the cost identical while actually covering every venue.
+    const perPageCap = Math.max(2, Math.floor(maxFacebookEvents / startUrls.length));
+    log.info(
+        `Fetching Facebook events for ${startUrls.length} nearby venue page(s), ` +
+            `up to ${perPageCap} each (total budget ${maxFacebookEvents}).`,
+    );
 
     const client = Actor.newClient();
-    let run;
-    try {
-        run = await client.actor(FACEBOOK_EVENTS_SCRAPER_ACTOR_ID).call({
-            startUrls,
-            maxEvents: maxFacebookEvents,
-        });
-    } catch (err) {
-        log.warning(`facebook-events-scraper (venue pages) run failed: ${err.message}`);
-        return [];
-    }
+    const perPageItems = await mapWithConcurrency(startUrls, VENUE_PAGE_CONCURRENCY, async (startUrl) => {
+        try {
+            const run = await client.actor(FACEBOOK_EVENTS_SCRAPER_ACTOR_ID).call({
+                startUrls: [startUrl],
+                maxEvents: perPageCap,
+            });
+            const { items } = await client.dataset(run.defaultDatasetId).listItems({ limit: perPageCap });
+            // Tag each item with the page it came from — the Actor's own inputUrl isn't a
+            // reliable join key, and one call per page makes the attribution unambiguous.
+            return items.map((item) => ({ item, venue: venueByUrl.get(startUrl) }));
+        } catch (err) {
+            log.warning(`Facebook venue page failed (${startUrl}): ${err.message}`);
+            return [];
+        }
+    });
 
-    const { items } = await client.dataset(run.defaultDatasetId).listItems({ limit: maxFacebookEvents });
-
+    const items = perPageItems.flat();
     const results = [];
     let nonMusicSkipped = 0;
-    for (const item of items) {
+    for (const { item, venue } of items) {
         const eventName = item.name || '';
         if (!eventName) continue; // a page with no upcoming events yields one empty record
         const description = item.description || '';
@@ -161,10 +179,6 @@ export async function crawlFacebookVenuePages({ venues, maxFacebookEvents }) {
             nonMusicSkipped += 1;
             continue;
         }
-
-        // Which venue's page produced this? Fall back to trusting nothing if it can't be
-        // matched, so an unattributable event still has to prove it's electronic on its own.
-        const venue = venueByUrl.get(item.inputUrl) ?? [...venueByUrl.values()].find((v) => v.name === item.location?.name);
 
         const genres = classifyForInclusion(`${eventName} ${description}`, {
             // An event on a known electronic venue's own page inherits that venue's trust —

@@ -1,65 +1,44 @@
 import { CheerioCrawler, log } from 'crawlee';
 import { AGGREGATOR_SITES } from '../sources/seedSources.js';
 import { classifyForInclusion, looksElectronic } from '../genreClassifier.js';
+import { extractJsonLdEvents } from '../extractors/jsonLdEvents.js';
+import { extractEventCards } from '../extractors/eventCards.js';
+import { parseDate, stripDates } from '../extractors/dates.js';
 
 // Any single listing page producing more than this is misreading the page — see the check
-// in the request handler.
-const MAX_EVENTS_PER_AGGREGATOR = 120;
-
-const DATE_ISO_RE = /\b(\d{4})-(\d{2})-(\d{2})\b/;
-const DATE_CZ_RE = /\b(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4})\b/; // e.g. "12. 4. 2026" or "12.4.2026"
-
-function toIsoDate(year, month, day) {
-    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-}
-
-function parseDateFromText(text) {
-    if (!text) return null;
-    const iso = text.match(DATE_ISO_RE);
-    if (iso) return toIsoDate(iso[1], iso[2], iso[3]);
-    const cz = text.match(DATE_CZ_RE);
-    if (cz) return toIsoDate(cz[3], cz[2], cz[1]);
-    return null;
-}
+// in the request handler. Sized to fit a genuinely large genre calendar: jiripetrak.cz
+// legitimately lists ~143 upcoming parties nationwide, and the earlier 120 cap would have
+// discarded the lot as misextraction.
+const MAX_EVENTS_PER_AGGREGATOR = 250;
 
 /**
- * Many ticketing/listing sites (GoOut, ColosseumTicket, xTicket, etc.) embed schema.org
- * Event/MusicEvent data as JSON-LD for SEO. This is the most reliable signal available
- * without a per-site scraper, so we always try it first.
+ * Splits a trailing "▼ Venue, Town" location off an event title, for sources that append one.
+ *
+ * Worth a per-source rule because location is what decides whether an event survives at all:
+ * a candidate with no place can never clear the radius filter, and location-less aggregator
+ * output is exactly what left 10 of 12 candidates unplaceable on an earlier run. Every one of
+ * jiripetrak.cz's 143 events carries this suffix, so parsing it turns the whole feed from
+ * undroppable-but-useless into fully filterable.
+ *
+ * The last comma-separated part is the town and the rest is the venue ("Vítkovice, Ostrava",
+ * "Německé delikatesy u Philipa, Radotín, Praha"); with no comma it's a venue name on its own
+ * ("BrickHouse DOV"), left for the geocoder to resolve by name.
  */
-function extractJsonLdEvents($, source) {
-    const events = [];
+function splitLocationSuffix(title, source) {
+    const marker = source.locationSuffixMarker;
+    const cleanTitle = source.titlePrefixRe ? title.replace(source.titlePrefixRe, '').trim() : title;
+    if (!marker) return { eventName: cleanTitle, venue: '', city: '' };
 
-    $('script[type="application/ld+json"]').each((_, el) => {
-        let data;
-        try {
-            data = JSON.parse($(el).contents().text());
-        } catch {
-            return; // malformed JSON-LD on the page — skip it, not our problem to fix
-        }
+    const at = cleanTitle.lastIndexOf(marker);
+    if (at === -1) return { eventName: cleanTitle, venue: '', city: '' };
 
-        const roots = Array.isArray(data) ? data : [data];
-        for (const root of roots) {
-            const candidates = root?.['@graph'] ? root['@graph'] : [root];
-            for (const item of candidates) {
-                const types = item?.['@type'] ? (Array.isArray(item['@type']) ? item['@type'] : [item['@type']]) : [];
-                if (!types.includes('Event') && !types.includes('MusicEvent')) continue;
-
-                const address = item.location?.address;
-                events.push({
-                    eventName: item.name || source.name,
-                    date: item.startDate ? item.startDate.slice(0, 10) : null,
-                    venue: item.location?.name || source.name,
-                    address: typeof address === 'string' ? address : address?.streetAddress || '',
-                    city: typeof address === 'object' ? address?.addressLocality || '' : '',
-                    description: item.description || '',
-                    sourceUrl: item.url || source.listingUrl,
-                });
-            }
-        }
-    });
-
-    return events.filter((e) => e.date); // discard anything we couldn't date
+    const location = cleanTitle.slice(at + marker.length).trim();
+    const parts = location.split(',').map((part) => part.trim()).filter(Boolean);
+    return {
+        eventName: cleanTitle.slice(0, at).trim() || cleanTitle,
+        venue: parts.length > 1 ? parts.slice(0, -1).join(', ') : location,
+        city: parts.length > 1 ? parts[parts.length - 1] : '',
+    };
 }
 
 /**
@@ -74,15 +53,15 @@ function extractHeuristicEvents($, source) {
 
     $('a').each((_, el) => {
         const $el = $(el);
-        const text = $el.text().trim();
+        const text = $el.text().replace(/\s+/g, ' ').trim();
         if (text.length < 3) return;
 
-        const date = parseDateFromText(text) || parseDateFromText($el.parent().text());
+        const date = parseDate(text) || parseDate($el.parent().text().replace(/\s+/g, ' '));
         if (!date) return;
 
         if (!source.forcedGenre && !source.trustedElectronic && !looksElectronic(text)) return;
 
-        const title = text.replace(DATE_ISO_RE, '').replace(DATE_CZ_RE, '').trim() || source.name;
+        const title = stripDates(text) || source.name;
         const href = $el.attr('href');
 
         events.push({
@@ -115,9 +94,26 @@ export async function crawlAggregators() {
         },
         async requestHandler({ request, $ }) {
             const source = request.userData.source;
+
+            // Three tiers, best signal first: publisher-provided JSON-LD, then the card
+            // extractor (which reads date+title off a page's event cards), then the dated-link
+            // heuristic as a last resort. The card tier was added because it reads sources the
+            // link heuristic could not: 143 events off jiripetrak.cz where the heuristic found
+            // only nav furniture.
             let events = extractJsonLdEvents($, source);
+            let via = 'JSON-LD';
+            if (events.length === 0) {
+                events = extractEventCards($, source).map((event) => ({
+                    ...event,
+                    ...splitLocationSuffix(event.eventName, source),
+                    address: '',
+                    description: '',
+                }));
+                via = 'DOM cards';
+            }
             if (events.length === 0) {
                 events = extractHeuristicEvents($, source);
+                via = 'dated links';
             }
 
             // Collected per source rather than pushed straight into `results`: handlers run
@@ -132,6 +128,7 @@ export async function crawlAggregators() {
 
                 kept.push({
                     ...event,
+                    venue: event.venue || source.name,
                     genres,
                     sourceName: source.name,
                     confidence: source.confidence,
@@ -152,7 +149,7 @@ export async function crawlAggregators() {
             }
 
             results.push(...kept);
-            log.info(`${source.name}: found ${events.length} raw event(s), kept ${kept.length}; ${results.length} total so far.`);
+            log.info(`${source.name}: ${events.length} raw event(s) via ${via}, kept ${kept.length}; ${results.length} total so far.`);
         },
     });
 

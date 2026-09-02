@@ -17,15 +17,6 @@ const CONFIDENCE_RANK = { high: 0, moderate: 1, low: 2 };
 // Maps-discovered venues carry their own exact coordinates and are filtered strictly.
 const VENUE_CITY_SLACK_KM = 15;
 
-// The Actor's run timeout is a platform setting, not something actor.json can control, and
-// it defaults to 300s — a run that overshoots is aborted having pushed nothing at all. So
-// reserve the tail of the budget for the steps that actually produce output (remaining
-// geocoding, dedupe, pushData, the email digest) and stop starting new club-site crawls
-// once it's gone. Assumes the 300s default; harmless if the timeout has been raised, since
-// a fast run never reaches the deadline.
-const ASSUMED_RUN_TIMEOUT_MS = 300_000;
-const OUTPUT_RESERVE_MS = 75_000;
-
 // Wider than the Czech Republic is across, so any "city" resolving further than this is a
 // mis-geocode rather than a real place — see cityIsPlausiblyInRange.
 const IMPLAUSIBLE_CITY_DISTANCE_KM = 1000;
@@ -66,9 +57,6 @@ function withinDateRange(isoDate, dateRangeDays) {
 
     return date >= todayUtc && date <= rangeEnd;
 }
-
-const runStartedAt = Date.now();
-const clubCrawlDeadline = runStartedAt + ASSUMED_RUN_TIMEOUT_MS - OUTPUT_RESERVE_MS;
 
 await Actor.init();
 
@@ -141,20 +129,27 @@ try {
         `${inRangeVenues.length} of ${knownVenues.length} known venue(s) in range of "${city}" — ` +
             `${crawlableVenues.length} with a crawlable website.`,
     );
-    const clubEvents = await crawlClubSites(crawlableVenues, { deadline: clubCrawlDeadline });
+    const clubEvents = await crawlClubSites(crawlableVenues);
 
     // Facebook events straight off in-range venues' own pages. Unlike Facebook *search*
     // (off by default — see README), this is targeted: it only asks about venues already
     // established to be nearby, and verified live to return dated events with coordinates.
     // Sources are the seed list's verified facebookPage entries plus any Maps-discovered
     // venue whose "website" is itself a Facebook page.
-    const venuePages = [
-        ...inRangeVenues.filter((v) => v.facebookPage).map((v) => ({ ...v, facebookPage: v.facebookPage })),
+    // Deduped by page URL: a seeded venue's facebookPage and a Maps discovery of that same
+    // page would otherwise each spend a paid Actor call fetching identical events. The seeded
+    // entry is kept, since its genre/confidence flags are hand-verified.
+    const venuePagesByUrl = new Map();
+    for (const venue of [
         ...mapsVenues
             .filter((v) => /facebook\.com/i.test(v.url))
             .filter((v) => typeof v.lat !== 'number' || haversineDistanceKm(cityCoords, { lat: v.lat, lon: v.lon }) <= radiusKm)
             .map((v) => ({ ...v, facebookPage: v.url })),
-    ];
+        ...inRangeVenues.filter((v) => v.facebookPage),
+    ]) {
+        venuePagesByUrl.set(venue.facebookPage.replace(/\/+$/, '').toLowerCase(), venue);
+    }
+    const venuePages = [...venuePagesByUrl.values()];
     const facebookVenueEvents = includeFacebookVenuePages
         ? await crawlFacebookVenuePages({ venues: venuePages, maxFacebookEvents })
         : [];

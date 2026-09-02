@@ -20,8 +20,13 @@ const SEARCH_TERMS = ['night club', 'hudební klub', 'taneční klub'];
 // with no word-boundary transition. Deliberately excludes "café"/"kavárna": a live run showed
 // that's too common a naming pattern for genuine live-music venues (e.g. our own confirmed
 // "Rock Café Jablunkov") to safely treat as a coffee-shop signal.
+// "tanečn"/"tanec"/"dance school" covers ballroom and competitive dance clubs, which Maps
+// returns in numbers for a "dance/club" search but which never publish a DJ programme: a live
+// Návsí run spent 4 of its 13 crawl slots on Dance School Chlopčík, TK Trend Ostrava, Taneční
+// klub AKCENT and Taneční skupina Aktiv, all yielding nothing. Matched as a prefix rather than
+// a whole word, because Czech inflects the suffix ("taneční", "tanečního", "tanečná").
 const EXCLUDED_NAME_RE =
-    /\b(tenis|tennis|paraglid|lions|rotary|kiwanis|skaut|scout|hasič|hasic|škol|skol|szkoł|akadem|studi|kurz|restaurac|jídeln|jidelni|grill|bistro|hotel|penzion|kostel|church|muzeum|museum|galeri|gallery|divadl|kino|cinema|fotbal|football|hokej|hockey|volejbal|golf|fitness|jóg|jog|yog|smak)/i;
+    /\b(tenis|tennis|paraglid|lions|rotary|kiwanis|skaut|scout|hasič|hasic|škol|skol|szkoł|akadem|studi|kurz|restaurac|jídeln|jidelni|grill|bistro|hotel|penzion|kostel|church|muzeum|museum|galeri|gallery|divadl|kino|cinema|fotbal|football|hokej|hockey|volejbal|golf|fitness|jóg|jog|yog|smak|tanečn|tanecn|tanec\b|dance (school|studio|academy)|zumba|balet|ballet)/i;
 
 /**
  * Discovers club-like venues near a geocoded point via Google Maps (compass/crawler-google-places,

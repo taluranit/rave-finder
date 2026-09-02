@@ -33,11 +33,15 @@ export const CLUB_SITES = [
     { name: 'Fabric', city: 'Ostrava', url: 'https://www.fabricat.cz', genreFocus: ['techno'], confidence: 'high', trustedElectronic: true },
     // Confirmed live (self-describes as "LIVE & ELECTRONIC CLUB") while investigating a
     // Jablunkov/Návsí-area gap in coverage.
-    // facebookPage is set only where it's been verified to return events — see
-    // crawlFacebookVenuePages. For this venue the page's events tab returned 3 real dated
-    // events with coordinates, while its website yielded nothing under the free cheerio
-    // crawler, so Facebook is the better source for it.
-    { name: 'Rokáč (Rock Café Jablunkov)', city: 'Jablunkov', url: 'https://rokac.cz', facebookPage: 'https://www.facebook.com/rokac.cz', genreFocus: ['techno', 'house', 'drum_and_bass'], confidence: 'high', trustedElectronic: true },
+    // NOT trustedElectronic, despite branding itself "LIVE & ELECTRONIC CLUB". Its actual
+    // Facebook programme, read live, is overwhelmingly rock and metal: ONSLAUGHT, WITCH
+    // HAMMER, BENEDICTION, a Rammstein tribute, David Koller, Pokáč. Trusting the
+    // self-description meant tagging metal gigs, an 80s/90s night and a pizza Sunday as
+    // "electronic" — so its events have to show a genre or DJ signal of their own like any
+    // other mixed-programming venue. facebookPage is set because the page's events tab does
+    // return real dated events with coordinates while the website yields nothing under the
+    // free cheerio crawler.
+    { name: 'Rokáč (Rock Café Jablunkov)', city: 'Jablunkov', url: 'https://rokac.cz', facebookPage: 'https://www.facebook.com/rokac.cz', genreFocus: [], confidence: 'moderate' },
 
     // Moderate/low genre-focus confidence — mixed programming, so genre inclusion still
     // requires the broadened keyword/DJ signal rather than being trusted outright.
@@ -67,49 +71,56 @@ export const AGGREGATOR_SITES = [
     { name: 'xTicket', url: 'https://www.xticket.cz', listingUrl: 'https://www.xticket.cz/koncerty-festivaly', confidence: 'moderate' },
     { name: 'KoncertyPraha', url: 'https://www.koncertypraha.cz', listingUrl: 'https://www.koncertypraha.cz', confidence: 'moderate' },
     { name: 'Rave.cz', url: 'https://rave.cz', listingUrl: 'https://rave.cz/partylist', confidence: 'high', trustedElectronic: true },
+    // A dedicated D&B/techno party calendar, and the highest-yield free source found: 143
+    // upcoming events on the last check, every single one carrying its venue and town after a
+    // "▼" marker, which `locationSuffixMarker` below parses out. That matters as much as the
+    // count — an event with no location can never clear the radius filter, and it was
+    // location-less aggregator output that made 10 of 12 otherwise-good candidates
+    // unplaceable on an earlier run. Titles also carry a "PÁ12 » SO12" day/time prefix that
+    // `titlePrefixRe` strips.
+    { name: 'Jiří Petrák D&B/Techno kalendář', url: 'https://www.jiripetrak.cz', listingUrl: 'https://www.jiripetrak.cz/cs/drum-a-bass-a-techno-parties-kalendar-akci-44/', confidence: 'high', trustedElectronic: true, locationSuffixMarker: '▼', titlePrefixRe: /^[A-ZÁ-Ž]{2}\d{1,2}\s*(»\s*[A-ZÁ-Ž]{0,2}\d{1,2})?\s*✅?\s*/ },
 ];
 
 /**
- * Genre-specific Czech party calendars — the most on-target free sources found so far, and
- * deliberately NOT enabled yet.
+ * Genre-specific calendars still needing per-site extraction before they can be enabled.
  *
- * Both are dedicated D&B/techno listings rather than general culture portals, and both are
- * server-rendered plain HTML (jiripetrak.cz showed 33 upcoming events when checked, Beats
- * for Love among them). Note jiripetrak.cz was originally dismissed as a "personal page";
- * that was a misread — it's a genre party calendar.
+ * dnbczevents.cz groups its listings under day headers, so the card extractor resolves each
+ * event's title to the weekday it sits under — 41 events all named "pátek" or "sobota". The
+ * dates are read correctly; only the titles need a site-specific selector. (Its earlier
+ * failure was worse: the dated-link heuristic produced 886 "events" that were nav links, city
+ * names and DJ names.)
  *
- * They're parked here because the generic heuristic extractor cannot read them: it scans
- * every dated <a> on a page, so a live test produced 886 "events" from dnbczevents.cz that
- * were actually nav links, city names and DJ names ("← Zpátky na hlavní stranu", "Praha",
- * "EmZee"). Junk candidates aren't merely untidy — each one costs a geocoding call at
- * Nominatim's 1 req/sec, which on its own would exhaust the run's time budget.
- *
- * Enabling these needs per-site extraction against their actual DOM, not the generic
- * fallback. High value when done: they list exactly the events this Actor exists to find.
+ * Its sibling jiripetrak.cz WAS in this list and is now a live AGGREGATOR_SITES entry — the
+ * card extractor reads it correctly. Note it was originally dismissed as a "personal page";
+ * that was a misread, it's a genre party calendar and the best free source here.
  */
 export const CANDIDATE_AGGREGATORS_NEEDING_CUSTOM_EXTRACTION = [
-    { name: 'Jiří Petrák D&B/Techno calendar', listingUrl: 'https://www.jiripetrak.cz/cs/drum-a-bass-a-techno-parties-kalendar-akci-44/' },
     { name: 'DNB CZ Events', listingUrl: 'https://dnbczevents.cz/akce.php' },
 ];
 
 /**
- * Venues and promoters that publish to Facebook rather than to a crawlable website.
+ * Venues that publish their programme to a Facebook page rather than to a crawlable website.
  *
- * These exist because Facebook venue pages turned out to be the only source that reliably
- * finds events near a small town: Rokáč's own website yielded nothing under the free cheerio
- * crawler while its Facebook page returned 15 events. Entries have no `url` — there's nothing
- * to web-crawl — so they're only ever used by crawlFacebookVenuePages, and the `city` is what
- * the distance pre-filter uses to decide whether they're worth asking about.
+ * Entries have no `url` — there's nothing to web-crawl — so they're only ever used by
+ * crawlFacebookVenuePages, and the `city` is what the distance pre-filter uses to decide
+ * whether they're worth spending a paid Actor call on.
  *
- * Researched rather than live-tested individually; a single run validates the whole batch,
- * since one Actor call takes all the page URLs at once.
+ * ONLY ADD A PAGE AFTER CONFIRMING IT HOSTS UPCOMING EVENTS. This list previously held four
+ * researched-but-unvalidated pages (TESLA Production/Třinec, PartyTime/Frýdek-Místek, Project
+ * Bar and DNB pro Ostravaky/Ostrava) and every one returned "No event detail URLs found". The
+ * slugs were all real; the pages simply host nothing. Checking two by hand showed why, and
+ * it's a regional pattern rather than bad luck: TESLA's events tab reads "No events to show"
+ * with only Past entries, and PartyTime's page has no events tab at all. Around here the
+ * *promoter* creates the event and merely tags the venue — TESLA's own feed advertises "Future
+ * Control Open Air 2026", hosted by a separate Future Control page. So a venue page is worth
+ * seeding only once its `/upcoming_hosted_events` tab is seen to list something; promoter
+ * pages are the better target, and finding them needs a logged-in Facebook search this Actor
+ * can't do.
  */
-export const FACEBOOK_VENUE_PAGES = [
-    { name: 'TESLA Production', city: 'Třinec', facebookPage: 'https://www.facebook.com/TeslaTrinec', confidence: 'moderate', trustedElectronic: true },
-    { name: 'PartyTime Frýdek-Místek', city: 'Frýdek-Místek', facebookPage: 'https://www.facebook.com/partytimefm', confidence: 'moderate', trustedElectronic: true },
-    { name: 'Project Bar', city: 'Ostrava', facebookPage: 'https://www.facebook.com/projectmusicbar', confidence: 'moderate', trustedElectronic: true },
-    { name: 'DNB pro Ostravaky', city: 'Ostrava', facebookPage: 'https://www.facebook.com/DNBproOSTRAVAKY', confidence: 'moderate', trustedElectronic: true },
-];
+// Currently empty: the one page validated to host upcoming events (Rokáč) is already a
+// CLUB_SITES entry carrying its own `facebookPage`, so it's picked up from there. This list is
+// for venues that have a Facebook page and *no* website of their own.
+export const FACEBOOK_VENUE_PAGES = [];
 
 // Explicitly excluded per v1 scope decision: too low-signal for reliable event extraction
 // (KudyZNudy, Kultura365 are general tourism/culture aggregators; personal pages are
