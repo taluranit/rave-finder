@@ -44,8 +44,8 @@
         "includeFacebookEvents": {
             "title": "Include Facebook Events",
             "type": "boolean",
-            "description": "Search Facebook Events in addition to club sites and aggregators (uses the apify/facebook-events-scraper Actor, which has its own usage cost).",
-            "default": true
+            "description": "Search Facebook Events in addition to the other sources (uses the apify/facebook-events-scraper Actor, ~$0.013/event). Off by default: Facebook's event search OR-matches rather than filtering, so it reliably returns either global genre matches or every unrelated event in the town, and in live testing it surfaced no electronic events for the searched region while consuming most of the run's time and budget. Turn it on if you want to try it for a bigger city.",
+            "default": false
         },
         "maxFacebookEvents": {
             "title": "Max Facebook events",

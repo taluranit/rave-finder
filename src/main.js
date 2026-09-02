@@ -63,7 +63,7 @@ try {
         radiusKm = 30,
         genres = ['techno', 'house', 'drum_and_bass', 'electronic'],
         dateRangeDays = 30,
-        includeFacebookEvents = true,
+        includeFacebookEvents = false,
         maxFacebookEvents = 20,
         maxMapsVenues = 5,
         subscriberEmail,

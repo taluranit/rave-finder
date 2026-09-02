@@ -46,8 +46,8 @@ Events. Optionally sends you a periodic email digest of newly found events.
    - **Facebook Events** — via
      [`apify/facebook-events-scraper`](https://apify.com/apify/facebook-events-scraper),
      searched by genre + the **towns Facebook actually indexes** near your search point (no
-     hardcoded page list). Skipped if `includeFacebookEvents` is false, since it has a real
-     per-event cost (~$0.013/event).
+     hardcoded page list). **Off by default** (`includeFacebookEvents: false`) — see
+     "Why Facebook search is off" below. It costs ~$0.013/event when enabled.
      Searching the literal input city was a mistake worth documenting: Facebook's event
      search is keyword matching, *not* a location filter. Verified live for "Návsí" —
      techno/house/electronic each returned "No events found", while "drum and bass Návsí"
@@ -84,6 +84,30 @@ Events. Optionally sends you a periodic email digest of newly found events.
    than one source.
 6. Pushes the results to the default dataset.
 7. If you gave a `subscriberEmail`, sends an email digest of newly found events (see below).
+
+## Why Facebook search is off
+
+Facebook's event search OR-matches instead of filtering, and both failure modes were hit in
+live testing:
+
+- Searching the literal input city ignored the *place*: "drum and bass Návsí" returned ~150
+  global D&B events from Coventry, Budapest and Brooklyn.
+- Searching real nearby towns ignored the *genre*: "drum and bass Havířov" returned every
+  unrelated event in Havířov — maternity-ward tours, yoga classes, a dog-school race,
+  board-game nights.
+
+Either way the events are billed at ~$0.013 each *before* this Actor's genre and radius
+filters discard them, and one run spent its entire 300-second budget on Facebook while
+surfacing no electronic events for the searched region at all.
+
+This is a limitation of the *search* index, not of Facebook as a source — small promoters
+genuinely do publish there, but on venue and promoter **pages** rather than anywhere the
+event search reaches. The promising direction is therefore to feed known venue pages to the
+scraper as `startUrls`; Maps discovery already surfaces venue Facebook pages (currently
+skipped, since `cheerio` can't read facebook.com). That Actor documents `startUrls` as
+event/search/explore URLs rather than page URLs, so it needs a cheap live test first.
+
+The search path is kept in the code and can be re-enabled with `includeFacebookEvents: true`.
 
 ## Actor-run budget
 
@@ -122,7 +146,7 @@ geocoding is rate-limited to 1 request/second by Nominatim's usage policy.
 | `radiusKm` | integer | `30` | Max distance from the city center, in km (1–300). |
 | `genres` | array | all four | `techno`, `house`, `drum_and_bass`, `electronic` (generic — electronic/DJ events with no specific genre named). |
 | `dateRangeDays` | integer | `30` | Only include events within this many days from now (1–180). |
-| `includeFacebookEvents` | boolean | `true` | Also search Facebook Events. |
+| `includeFacebookEvents` | boolean | `false` | Also search Facebook Events — off by default, see below. |
 | `maxFacebookEvents` | integer | `20` | Caps Facebook events fetched, to control cost. |
 | `maxMapsVenues` | integer | `5` | Caps Maps-discovered venues per search term, to control cost; `0` disables Maps discovery. Low by default — each discovered venue costs an Actor call, and most Maps hits are dance schools and bars, not electronic venues. |
 | `subscriberEmail` | string | *(none)* | If set, enables the email digest (see below). |
