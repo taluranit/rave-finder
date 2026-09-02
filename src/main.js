@@ -219,13 +219,19 @@ try {
     for (const event of candidates) {
         let venueCoords = typeof event.lat === 'number' && typeof event.lon === 'number' ? { lat: event.lat, lon: event.lon } : null;
         if (!venueCoords) {
-            // Prefer the event's own city (e.g. a Facebook event's actual location) over the
-            // input city — using the input city here was the bug that let a Berlin Facebook
-            // event pass a 50km radius filter: the query became "{Berlin venue}, {input city}",
-            // which Nominatim couldn't resolve to the real venue and fell back to matching just
-            // the input city itself, i.e. ~0km away.
-            const eventCity = event.city || city;
-            const query = withCountry(event.address ? `${event.address}, ${eventCity}` : `${event.venue}, ${eventCity}`);
+            // Never fold the *input* city into this query. Doing so was the bug that let a
+            // Berlin Facebook event pass a 50km radius filter — "{Berlin venue}, Návsí" doesn't
+            // resolve to the venue, so Nominatim fell back to matching Návsí itself, i.e. ~0km
+            // away. It also broke the reverse case: a Resident Advisor event whose only
+            // locator is an address became "Sklub, Návsí" and failed to resolve at all,
+            // which is why a Návsí run reported 12 otherwise-good events as unplaceable.
+            //
+            // A street address already names its own locality (RA returns e.g.
+            // "Krymská 21, Praha"), so it's used alone. Only a bare venue name needs a city,
+            // and only the event's own.
+            const query = event.address
+                ? withCountry(event.address)
+                : withCountry([event.venue, event.city].filter(Boolean).join(', '));
             venueCoords = await geocode(query);
         }
         if (!venueCoords) {

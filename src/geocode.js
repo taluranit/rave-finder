@@ -35,9 +35,18 @@ async function throttle() {
  * @param {string} query
  * @returns {Promise<{lat: number, lon: number} | null>}
  */
-export async function geocode(query) {
+export async function geocode(rawQuery) {
+    // Sources hand over addresses with invisible characters in them — one Resident Advisor
+    // address ended in U+200E (left-to-right mark), which silently defeats geocoding with no
+    // visible difference in logs. Strip zero-width/directional marks and collapse whitespace.
+    const query = (rawQuery || '')
+        .replace(/[​-‏‪-‮﻿]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!query) return null;
+
     const store = await loadCache();
-    const cacheKey = query.trim().toLowerCase();
+    const cacheKey = query.toLowerCase();
 
     if (store[cacheKey] !== undefined) {
         return store[cacheKey];
