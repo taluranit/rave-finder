@@ -2,16 +2,26 @@
 
 Finds upcoming **electronic music and DJ events** — techno, house, drum & bass, and
 generally-electronic events that don't name a specific genre — near a Czech city, within a
-radius you choose. Searches club websites, event aggregators (GoOut, DnB e-Heard,
-ColosseumTicket, KdyKde, xTicket, KoncertyPraha, Rave.cz), and Facebook Events. Optionally
-sends you a periodic email digest of newly found events.
+radius you choose. Searches Resident Advisor, event aggregators (GoOut, DnB e-Heard,
+ColosseumTicket, KdyKde, xTicket, KoncertyPraha, Rave.cz), club websites, and Facebook
+Events. Optionally sends you a periodic email digest of newly found events.
 
 **v1 scope: Czech Republic only.**
 
 ## How it works
 
 1. Geocodes the city you give it (OpenStreetMap Nominatim, no API key needed).
-2. Crawls four kinds of sources in parallel:
+2. Crawls several kinds of sources, in phases (see "Actor-run budget" below):
+   - **Resident Advisor** — the primary source, and the only one that's simultaneously free,
+     genre-tagged at the source, and geographically scoped by the API itself. RA's GraphQL
+     API needs no authentication, so `src/crawlers/residentAdvisorCrawler.js` calls it
+     directly rather than paying for a scraper Actor: no per-event cost, and it doesn't
+     consume a concurrent-Actor-run slot. Verified live: one country-wide query returns ~114
+     upcoming Czech events, 111 of them with real street addresses, carrying RA's own genre
+     taxonomy ("Techno", "Progressive House", "Garage", "Electronica"…).
+     RA areas are city/region level — Prague and Brno have their own, smaller towns like
+     Ostrava and Frýdek-Místek don't — so this queries the country-wide "All Czech Republic"
+     area and lets the radius filter do the geography.
    - **Aggregators** — listing sites, preferring their embedded JSON-LD event data where
      available, with a heuristic HTML fallback otherwise.
    - **Club sites (seeded list)** — no structured data, so pages are fetched via the
@@ -35,8 +45,17 @@ sends you a periodic email digest of newly found events.
      disable.
    - **Facebook Events** — via
      [`apify/facebook-events-scraper`](https://apify.com/apify/facebook-events-scraper),
-     searched by genre + city (no hardcoded page list). Skipped if `includeFacebookEvents`
-     is false, since it has a real per-event cost (~$0.013/event).
+     searched by genre + the **towns Facebook actually indexes** near your search point (no
+     hardcoded page list). Skipped if `includeFacebookEvents` is false, since it has a real
+     per-event cost (~$0.013/event).
+     Searching the literal input city was a mistake worth documenting: Facebook's event
+     search is keyword matching, *not* a location filter. Verified live for "Návsí" —
+     techno/house/electronic each returned "No events found", while "drum and bass Návsí"
+     silently ignored the place and returned ~150 global D&B events from Coventry, Budapest
+     and Brooklyn, all of which the radius filter then correctly discarded. So the whole
+     paid call was spent on noise. `src/nearbyTowns.js` now resolves real towns within the
+     radius via OpenStreetMap's Overpass API (free, keyless) — for Návsí+50km that's
+     Ostrava, Žilina, Havířov, Frýdek-Místek and so on — and those get searched instead.
 3. Classifies each event's genre(s) — see `src/genreClassifier.js`:
    - Structural tags win outright (e.g. DnB e-Heard's `forcedGenre: 'drum_and_bass'`).
    - A specific genre keyword (techno/house/drum & bass, CZ + EN, word-boundary matched —
@@ -53,12 +72,40 @@ sends you a periodic email digest of newly found events.
      electronic/DJ signal ("dj", "electronic", "elektronika", "edm", "rave") — this is what
      keeps rock/jazz/theater listings on those same sources from flooding the output.
 4. Geocodes each venue and filters by distance from the city center — cached in the
-   key-value store, except Maps-discovered venues, which already carry their own
-   coordinates from Google Maps and skip this step.
+   key-value store, except Maps-discovered venues and Resident Advisor events, which already
+   carry their own coordinates or a street address.
+
+   Club sites are also **distance-pre-filtered before being crawled**, not just after:
+   every seeded venue has a known city, so geocoding that city (cached, free) rules out the
+   ones that can't possibly be in range. Searching Návsí used to spend one Actor call each on
+   Cross Club, Roxy, Ankali, MeetFactory, Lucerna and the rest of the Prague/Brno list — all
+   ~350km away, every resulting event discarded by the radius filter anyway.
 5. Filters by requested genres and date range, then dedupes events that show up on more
    than one source.
 6. Pushes the results to the default dataset.
 7. If you gave a `subscriberEmail`, sends an email digest of newly found events (see below).
+
+## Actor-run budget
+
+Apify caps **concurrent Actor runs per account** (5 on the plan this was built against,
+*including this Actor's own run*), and `apify/website-content-crawler` defaults to 8192MB of
+memory per call — which also counts against a shared memory ceiling. Both limits were hit
+hard in testing, and failed silently-ish: every club-site crawl in a run aborted with
+"you will exceed your limit of 5 concurrent Actor runs" while the run itself still reported
+success with zero results.
+
+So the pipeline is deliberately phased rather than maximally parallel:
+
+| Phase | What runs | Actor calls |
+|---|---|---|
+| 1 | Resident Advisor, aggregators, nearby-town lookup, Maps discovery | 1 (Maps only) |
+| 2 | Facebook Events (needs phase 1's town list) | 1 |
+| 3 | Club sites, in-range only, concurrency 3 | up to 3 at a time |
+
+Free/keyless sources (Resident Advisor, Nominatim, Overpass) and the in-process Crawlee
+aggregator crawl cost **zero** Actor slots, which is a large part of why RA is the primary
+source. Each `website-content-crawler` call is also pinned to 512MB rather than its 8192MB
+default.
 
 ## Input
 
@@ -70,7 +117,7 @@ sends you a periodic email digest of newly found events.
 | `dateRangeDays` | integer | `30` | Only include events within this many days from now (1–180). |
 | `includeFacebookEvents` | boolean | `true` | Also search Facebook Events. |
 | `maxFacebookEvents` | integer | `50` | Caps Facebook events fetched, to control cost. |
-| `maxMapsVenues` | integer | `20` | Caps Maps-discovered venues per search term, to control cost; `0` disables Maps discovery. |
+| `maxMapsVenues` | integer | `5` | Caps Maps-discovered venues per search term, to control cost; `0` disables Maps discovery. Low by default — each discovered venue costs an Actor call, and most Maps hits are dance schools and bars, not electronic venues. |
 | `subscriberEmail` | string | *(none)* | If set, enables the email digest (see below). |
 | `digestFrequency` | enum | `weekly` | `daily` / `weekly` / `biweekly` / `monthly`. |
 | `resendApiKey` | string (secret) | *(none)* | Required only if `subscriberEmail` is set. |
@@ -120,6 +167,7 @@ first `apify run`, or by running `apify run --input '{"city": "Brno"}'` (see the
 src/main.js                Pipeline orchestration
 src/sources/seedSources.js Seed list of club sites and aggregators
 src/crawlers/               One crawler module per source type
+src/nearbyTowns.js          Real towns within the radius (Overpass), for Facebook search
 src/concurrency.js          Bounded-concurrency helper for crawling many sites in parallel
 src/geocode.js              Nominatim geocoding + Haversine distance, KV-cached
 src/genreClassifier.js      Genre classification: specific keywords, trusted-source fallback
@@ -141,6 +189,19 @@ Dockerfile                  apify/actor-node base image
   Experience (a satellite series at Nová Osmička in Frýdek-Místek) only survives because its
   listings mention specific DJs/genres — a bare artist-only listing wouldn't.
 - Scope is Czech Republic only.
+- **GoOut is underused.** It's the largest Czech event source, and it does have a real public
+  API — `https://goout.net/services/entities/v1/schedules` responds with structured schedules
+  (dates, pricing, ticketing state) once you pass the required `languages[]` parameter. But
+  its filter parameter names still need reverse-engineering: `tag` and `city` were both
+  silently ignored in testing, and venue/performer data appears to need an `include=`
+  parameter. Until that's worked out, GoOut is still just being HTML-scraped like the other
+  aggregators. Worth doing — it's probably the biggest remaining coverage win.
+- **Facebook venue pages aren't used directly.** Maps discovery often returns a venue's
+  Facebook page as its website; those are now skipped rather than crawled (cheerio can't read
+  facebook.com anyway). Feeding them to `facebook-events-scraper` as `startUrls` would likely
+  be the single best data path for small venues that publish only to Facebook — but that
+  Actor documents `startUrls` as event/search/explore URLs, not venue page URLs, so it needs
+  a cheap live test before being relied on.
 - The Facebook Events search relies on `apify/facebook-events-scraper`'s own search
   behavior; there's no guarantee of full coverage for a given city/genre. Confirmed via a
   live test that its search isn't reliably location-scoped — a query like "drum and bass

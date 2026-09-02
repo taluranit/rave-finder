@@ -12,27 +12,38 @@ const GENRE_SEARCH_KEYWORDS = {
 
 /**
  * Calls apify/facebook-events-scraper with search queries built from the requested genres
- * and city — no hardcoded Facebook page list, it relies on the Actor's own search.
+ * and the *towns Facebook actually indexes* near the search point — no hardcoded page list.
  * Costs roughly $0.013/event, so this is skipped entirely when includeFacebookEvents is
  * false, and hard-capped by maxFacebookEvents.
  *
- * NOTE: this Actor's exact input field names aren't pinned down here beyond what's
- * documented for it (searchQueries + a result cap) — double check against the Actor's
- * current input schema on Apify Store before relying on this in production, since
- * third-party Actor schemas can change.
+ * Searching the literal input city was the mistake here: Facebook's event search is keyword
+ * matching, not a location filter. Verified live for "Návsí" — techno/house/electronic each
+ * returned "No events found" (no place index for a village that size), while "drum and bass
+ * Návsí" silently ignored the place and returned ~150 global D&B events from Coventry,
+ * Budapest, Brooklyn and so on. Every one was then correctly discarded by the radius filter,
+ * i.e. the whole call was spent on noise. Searching real nearby towns instead (Ostrava,
+ * Frýdek-Místek, Žilina…) targets places Facebook has actual event listings for.
+ *
+ * Input field names verified against the Actor's live input schema: searchQueries (array),
+ * startUrls (array), maxEvents (integer).
  *
  * @param {object} params
  * @param {string[]} params.genres
- * @param {string} params.city
+ * @param {string} params.city - the input city, used as a fallback when no towns were found
+ * @param {string[]} [params.searchCities] - real nearby towns to search (see nearbyTowns.js)
  * @param {number} params.maxFacebookEvents
  * @returns {Promise<object[]>}
  */
-export async function crawlFacebookEvents({ genres, city, maxFacebookEvents }) {
+export async function crawlFacebookEvents({ genres, city, searchCities = [], maxFacebookEvents }) {
     if (maxFacebookEvents <= 0) return [];
 
-    const searchQueries = genres.map((genre) => `${GENRE_SEARCH_KEYWORDS[genre] || genre} ${city}`);
+    // Fall back to the input city only if the nearby-town lookup came back empty.
+    const places = searchCities.length > 0 ? searchCities : [city];
+    const searchQueries = places.flatMap((place) =>
+        genres.map((genre) => `${GENRE_SEARCH_KEYWORDS[genre] || genre} ${place}`),
+    );
 
-    log.info(`Running facebook-events-scraper with queries: ${searchQueries.join(', ')} (cap ${maxFacebookEvents})`);
+    log.info(`Running facebook-events-scraper with ${searchQueries.length} quer(ies) across ${places.join(', ')} (cap ${maxFacebookEvents})`);
 
     const client = Actor.newClient();
     let run;

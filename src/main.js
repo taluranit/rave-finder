@@ -3,18 +3,43 @@ import { crawlAggregators } from './crawlers/aggregatorCrawler.js';
 import { crawlClubSites } from './crawlers/clubSiteCrawler.js';
 import { discoverClubSitesViaMaps } from './crawlers/mapsDiscoveryCrawler.js';
 import { crawlFacebookEvents } from './crawlers/facebookEventsCrawler.js';
+import { crawlResidentAdvisor } from './crawlers/residentAdvisorCrawler.js';
 import { CLUB_SITES } from './sources/seedSources.js';
+import { findNearbyTowns } from './nearbyTowns.js';
 import { geocode, haversineDistanceKm } from './geocode.js';
 import { dedupeEvents } from './dedupe.js';
 import { maybeSendDigest } from './email.js';
 
 const CONFIDENCE_RANK = { high: 0, moderate: 1, low: 2 };
 
+// Allows for a venue sitting out toward the edge of a large city rather than at the point its
+// city name geocodes to. Only applies to seeded venues, where all we know is the city —
+// Maps-discovered venues carry their own exact coordinates and are filtered strictly.
+const VENUE_CITY_SLACK_KM = 15;
+
 // Appends ", Czech Republic" for Nominatim, unless the place already names the country —
 // e.g. a user typing "Návsí, Czech Republic" as the city input would otherwise end up
 // geocoding "Návsí, Czech Republic, Czech Republic", which Nominatim fails to resolve.
 function withCountry(place) {
     return /czech/i.test(place) ? place : `${place}, Czech Republic`;
+}
+
+/**
+ * True if a venue could plausibly fall inside the search radius, so it's worth spending an
+ * Actor call crawling it. Searching Návsí previously crawled Cross Club, Roxy, Ankali,
+ * MeetFactory, Lucerna and the rest of the Prague/Brno seed list — ~350km away, one Actor
+ * call each, every resulting event discarded by the radius filter afterwards.
+ * Errs toward keeping a venue: if it can't be placed at all, crawl it and let the per-event
+ * radius filter decide.
+ */
+async function venueCouldBeInRange(site, cityCoords, radiusKm) {
+    if (typeof site.lat === 'number' && typeof site.lon === 'number') {
+        return haversineDistanceKm(cityCoords, { lat: site.lat, lon: site.lon }) <= radiusKm;
+    }
+    if (!site.city) return true;
+    const coords = await geocode(withCountry(site.city));
+    if (!coords) return true;
+    return haversineDistanceKm(cityCoords, coords) <= radiusKm + VENUE_CITY_SLACK_KM;
 }
 
 function withinDateRange(isoDate, dateRangeDays) {
@@ -40,7 +65,7 @@ try {
         dateRangeDays = 30,
         includeFacebookEvents = true,
         maxFacebookEvents = 50,
-        maxMapsVenues = 20,
+        maxMapsVenues = 5,
         subscriberEmail,
         digestFrequency = 'weekly',
         resendApiKey,
@@ -57,28 +82,49 @@ try {
         throw new Error(`Could not geocode city "${city}" — check the spelling and try again.`);
     }
 
-    // Apify's concurrent-Actor-run cap is shared across the whole account (confirmed live:
-    // 5 total, including this Actor's own run). Aggregators run in-process (Crawlee's own
-    // CheerioCrawler, not a separate Actor call) so they're free to run alongside anything;
-    // Maps discovery and Facebook are each one Actor call, so running those two together
-    // with this run itself is 3 of the 5 slots — safe. Club sites are crawled *after* this
-    // resolves, not concurrently with it: two 5-wide crawl pools (seeded + Maps-discovered)
-    // running at the same time as Maps discovery and Facebook were blowing straight through
-    // the cap, and every club-site crawl failed outright as a result.
-    const [aggregatorEvents, mapsVenues, facebookEvents] = await Promise.all([
+    // Work is split into phases because Apify's concurrent-Actor-run cap is shared across the
+    // whole account (confirmed live: 5 total, including this Actor's own run). Running
+    // everything at once blew straight through it and failed every club-site crawl outright.
+    //
+    // Phase 1 — sources that cost no Actor slots at all (aggregators run in-process via
+    // Crawlee; Resident Advisor and the nearby-town lookup are plain HTTPS calls to free,
+    // keyless APIs), plus Maps discovery, which is the one Actor call here.
+    const [aggregatorEvents, raEvents, mapsVenues, nearbyTowns] = await Promise.all([
         crawlAggregators(),
+        crawlResidentAdvisor({ dateRangeDays }),
         discoverClubSitesViaMaps({ cityCoords, radiusKm, maxMapsVenues }),
-        includeFacebookEvents ? crawlFacebookEvents({ genres, city, maxFacebookEvents }) : Promise.resolve([]),
+        includeFacebookEvents ? findNearbyTowns({ center: cityCoords, radiusKm }) : Promise.resolve([]),
     ]);
 
-    // Seeded and Maps-discovered venues share one crawl pool (see CLUB_SITE_CONCURRENCY).
-    const clubEvents = await crawlClubSites([...CLUB_SITES, ...mapsVenues]);
+    // Phase 2 — Facebook, which needs phase 1's nearby-town list to search places Facebook
+    // actually indexes rather than the literal input city.
+    const facebookEvents = includeFacebookEvents
+        ? await crawlFacebookEvents({ genres, city, searchCities: nearbyTowns, maxFacebookEvents })
+        : [];
 
-    let candidates = [...aggregatorEvents, ...clubEvents, ...facebookEvents];
+    // Phase 3 — club sites, one Actor call each, so only crawl venues that could actually be
+    // in range. Facebook pages are excluded outright: website-content-crawler in cheerio mode
+    // gets nothing useful from facebook.com (it needs JS and a session), and Maps discovery
+    // frequently returns a venue's Facebook page as its "website". Feeding those to
+    // facebook-events-scraper as startUrls would be the better use of them, but that Actor
+    // documents startUrls as event/search URLs rather than venue page URLs — unverified, so
+    // not wired up on a guess.
+    const crawlableVenues = [...CLUB_SITES, ...mapsVenues.filter((v) => !/facebook\.com/i.test(v.url))];
+    const inRangeVenues = [];
+    for (const site of crawlableVenues) {
+        if (await venueCouldBeInRange(site, cityCoords, radiusKm)) inRangeVenues.push(site);
+    }
+    log.info(
+        `Crawling ${inRangeVenues.length} of ${crawlableVenues.length} club site(s) — ` +
+            `skipped ${crawlableVenues.length - inRangeVenues.length} too far from "${city}" to matter.`,
+    );
+    const clubEvents = await crawlClubSites(inRangeVenues);
+
+    let candidates = [...raEvents, ...aggregatorEvents, ...clubEvents, ...facebookEvents];
     log.info(
         `Collected ${candidates.length} raw candidate event(s): ` +
-            `${aggregatorEvents.length} aggregator, ${clubEvents.length} club ` +
-            `(${CLUB_SITES.length} seeded + ${mapsVenues.length} Maps-discovered), ${facebookEvents.length} Facebook.`,
+            `${raEvents.length} Resident Advisor, ${aggregatorEvents.length} aggregator, ` +
+            `${clubEvents.length} club, ${facebookEvents.length} Facebook.`,
     );
 
     // Keep only events matching a requested genre (an event can match more than one).
