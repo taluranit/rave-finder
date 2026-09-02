@@ -26,14 +26,24 @@
  * dedicated to electronic music, not merely electronic-friendly/mixed-programming ones.
  */
 
+// Removed after a live health check of every seeded URL found them unreachable, so a future
+// maintainer knows they were checked rather than overlooked: Ankali (ankali.club NXDOMAIN,
+// ankali.cz resolves but serves nothing), Kabinet MUZ (kabinetmuz.cz resolves, no HTTP) and
+// Futurum Music Bar (futurumbar.cz NXDOMAIN; futurum.cz is an unrelated school). Ankali in
+// particular is a well-known Prague techno club, so it has presumably moved to social-only
+// publishing; re-add it with a facebookPage once a page hosting upcoming events is confirmed.
+// Also note kdykde.cz and sonocentrum.cz return 403 to this crawler (bot-blocked).
 export const CLUB_SITES = [
     // Strong genre-focus confidence — dedicated electronic/DJ venues, trusted outright
     { name: 'Cross Club', city: 'Praha', url: 'https://crossclub.cz', genreFocus: ['drum_and_bass', 'techno'], confidence: 'high', trustedElectronic: true },
     { name: 'Roxy', city: 'Praha', url: 'https://www.roxy.cz', genreFocus: ['house'], confidence: 'high', trustedElectronic: true },
-    { name: 'Ankali', city: 'Praha', url: 'https://ankali.club', genreFocus: ['techno'], confidence: 'high', trustedElectronic: true },
     { name: 'Chapeau Rouge', city: 'Praha', url: 'https://www.chapeaurouge.cz', genreFocus: ['drum_and_bass'], confidence: 'high', trustedElectronic: true },
-    { name: 'Kabinet MUZ', city: 'Brno', url: 'https://www.kabinetmuz.cz', genreFocus: ['house'], confidence: 'high', trustedElectronic: true },
-    { name: 'Fabric', city: 'Ostrava', url: 'https://www.fabricat.cz', genreFocus: ['techno'], confidence: 'high', trustedElectronic: true },
+    // fabricat.cz (the original entry) is NXDOMAIN — the live site is fabric.cz, "FABRIC |
+    // real clubbing". Worth calling out because the typo'd domain silently cost the single
+    // most relevant venue for a Návsí search: Fabric is 43km away, inside the default radius,
+    // and lists genre-labelled techno and D&B nights weekly. A dead URL is indistinguishable
+    // from a venue with no events in the run log.
+    { name: 'Fabric', city: 'Ostrava', url: 'https://www.fabric.cz', genreFocus: ['techno'], confidence: 'high', trustedElectronic: true },
     // Confirmed live (self-describes as "LIVE & ELECTRONIC CLUB") while investigating a
     // Jablunkov/Návsí-area gap in coverage.
     // NOT trustedElectronic, despite branding itself "LIVE & ELECTRONIC CLUB". Its actual
@@ -53,7 +63,6 @@ export const CLUB_SITES = [
     { name: 'MeetFactory', city: 'Praha', url: 'https://www.meetfactory.cz', genreFocus: [], confidence: 'moderate' },
     { name: 'Lucerna Music Bar', city: 'Praha', url: 'https://musicbar.cz', genreFocus: [], confidence: 'low' },
     { name: 'Palác Akropolis', city: 'Praha', url: 'https://www.palacakropolis.cz', genreFocus: [], confidence: 'low' },
-    { name: 'Futurum Music Bar', city: 'Praha', url: 'https://www.futurumbar.cz', genreFocus: [], confidence: 'low' },
     { name: 'Fleda', city: 'Brno', url: 'https://www.fleda.cz', genreFocus: [], confidence: 'moderate' },
     { name: 'SONO Centrum', city: 'Brno', url: 'https://www.sonocentrum.cz', genreFocus: [], confidence: 'moderate' },
     { name: 'Barrak Music Club', city: 'Ostrava', url: 'https://www.barrak.cz', genreFocus: [], confidence: 'low' },
