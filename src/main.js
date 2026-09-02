@@ -253,7 +253,12 @@ try {
             lat: venueCoords.lat,
             lon: venueCoords.lon,
             distanceKm,
-            city: event.city || city,
+            // The event's own city, or blank — never the *input* city as a fallback. Defaulting
+            // to the input labelled a Resident Advisor event at Dock, 43km away in Ostrava, as
+            // being in "Návsí". The distance is right there in the same record contradicting
+            // it, and a digest that says an event is in your village when it isn't is worse
+            // than one that admits it doesn't know the town.
+            city: event.city || '',
         });
     }
 

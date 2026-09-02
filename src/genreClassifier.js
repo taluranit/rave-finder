@@ -12,12 +12,35 @@ const SPECIFIC_GENRE_KEYWORDS = {
 };
 
 // Generic electronic/DJ signal, for events that are clearly electronic music but don't name
-// a specific genre — e.g. "Beats for Love Experience w/ KANINE" or a branded local party name.
-// Matched as whole words: a plain substring check on e.g. "rave" would false-positive on
-// "Morava"/"Moravec"/"Moravský" (extremely common Czech place/surnames), which literally
-// contain that substring.
-const GENERIC_ELECTRONIC_KEYWORDS = ['dj', 'electronic', 'elektronika', 'edm', 'rave'];
+// a specific genre. This is the gate that mixed-programming venues and general ticketing
+// aggregators depend on, so its recall matters: with only the genre words plus "dj", a live
+// run read all 14 of Nová Osmička's events correctly and then dropped every one — including
+// "BEATS FOR LOVE: EXPERIENCE ♡ w/ KRYDER", the house night that prompted this Actor. The
+// title names no genre and no DJ, but "beats"/"w/ <artist>" say exactly what it is.
+//
+// Matched as whole words, never as substrings: "rave" inside "Morava"/"Moravec"/"Moravský"
+// and "techno" inside "technologie"/"technika" are all common Czech words, and substring
+// matching on them produced confident nonsense.
+const GENERIC_ELECTRONIC_KEYWORDS = [
+    'dj', 'djs', 'djane', 'djs?ka', 'electronic', 'elektronick', 'elektronika', 'edm', 'rave',
+    // Lineup/set vocabulary — how a DJ night is written when it names no genre.
+    'b2b', 'dj set', 'live set', 'line-?up', 'afterparty', 'after party', 'warm-?up',
+    // "bass"/"beat(s)" are strong electronic markers in event titles ("BASS'N'KEBAB",
+    // "Spring BassJam", "FUNKY BEAT DAY") and don't collide with the rock/metal and
+    // community-event titles these sources are otherwise full of.
+    'bass', 'beat', 'beats', 'breakbeat', 'dubstep', 'trance', 'hardstyle', 'psytrance',
+    'disco', 'diskotéka', 'diskoteka', 'party', 'párty', 'mejdan', 'open air', 'openair',
+];
+// Deliberately not on the list: a bare "live", which would match "Live Tribute Act To
+// RAMMSTEIN"; and "tanečn"/"dance", which match ballroom and folk-dance events.
 const GENERIC_ELECTRONIC_RE = new RegExp(`\\b(${GENERIC_ELECTRONIC_KEYWORDS.join('|')})\\b`, 'i');
+
+// Named electronic events/promoters whose titles carry no genre word at all. Kept short and
+// specific — a brand list is a maintenance burden, justified only for events big enough that
+// missing them defeats the point (Beats for Love is the Czech Republic's largest D&B festival
+// and runs satellite "Experience" nights in the region).
+const KNOWN_ELECTRONIC_BRANDS = ['beats for love', 'b4l', 'let it roll', 'tancuj'];
+const KNOWN_BRAND_RE = new RegExp(`(${KNOWN_ELECTRONIC_BRANDS.join('|')})`, 'i');
 
 function escapeRegExp(str) {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -51,7 +74,11 @@ export function classifyGenres(text, knownGenres = []) {
 }
 
 function matchesGenericElectronicSignal(text) {
-    return GENERIC_ELECTRONIC_RE.test(text || '');
+    const haystack = text || '';
+    // "w/" is checked separately from the word list because it isn't a word — it's the
+    // lineup separator in titles like "EXPERIENCE ♡ w/ KRYDER", and requires a following
+    // name so a stray "w/o" or "w/e" doesn't count.
+    return GENERIC_ELECTRONIC_RE.test(haystack) || KNOWN_BRAND_RE.test(haystack) || /\sw\/\s*\p{L}{2,}/u.test(haystack);
 }
 
 /** True if `text` matches a specific genre keyword or the generic electronic/DJ vocabulary. */

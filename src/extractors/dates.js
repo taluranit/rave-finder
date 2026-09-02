@@ -16,7 +16,10 @@ const CZECH_MONTHS = {
     ledna: 1, unora: 2, února: 2, brezna: 3, března: 3, dubna: 4, kvetna: 5, května: 5, cervna: 6, června: 6,
     cervence: 7, července: 7, srpna: 8, zari: 9, září: 9, rijna: 10, října: 10, listopadu: 11, prosince: 12,
 };
-const DATE_CZ_NAMED_RE = new RegExp(`\\b(\\d{1,2})\\.\\s*(${Object.keys(CZECH_MONTHS).join('|')})\\s*(\\d{4})?\\b`, 'i');
+// No trailing \b: JS word boundaries are ASCII-only, so a boundary after a month ending in
+// "í" ("září") never matches and "5. září" would fail to parse at all. (?!\d) is what's
+// actually wanted here — don't let a 4-digit year be half-consumed.
+const DATE_CZ_NAMED_RE = new RegExp(`\\b(\\d{1,2})\\.\\s*(${Object.keys(CZECH_MONTHS).join('|')})(?:\\s*(\\d{4}))?(?!\\d)`, 'i');
 
 /** Every date pattern, for stripping dates out of a string that doubles as a title. */
 export const ALL_DATE_PATTERNS = [DATE_ISO_RE, DATE_CZ_NUMERIC_RE, DATE_CZ_NAMED_RE, DATE_CZ_NO_YEAR_RE];
@@ -29,15 +32,21 @@ function toIsoDate(year, month, day) {
 }
 
 /**
- * Infers the year for a day/month with none given, assuming the date is upcoming: a month
- * earlier than the current one means next year. Wrong for a page listing past events, but
- * those are discarded by the date-range filter either way, so erring toward "upcoming" only
- * risks keeping a stale event — never dropping a real one.
+ * Infers the year for a day/month with none given: always the current one.
+ *
+ * The tempting alternative — roll a month that's already past into next year, on the grounds
+ * that a listing shows upcoming events — fabricates events. dnbeheard.cz publishes one
+ * chronological calendar per year, so in September its page still opens with "2. 1.", "6. 1.",
+ * "9. 1.". Rolling those forward turned 501 past-and-present entries into a wall of
+ * confidently-dated January 2027 parties that do not exist.
+ *
+ * Assuming the current year instead means a past event stays in the past and gets dropped by
+ * the date-range filter, which is the right outcome. The cost is missing a genuinely
+ * next-January event listed without a year. That trade is deliberate: a miss is a gap in
+ * coverage, a phantom is wrong data in the user's digest.
  */
-function inferYear(month) {
-    const now = new Date();
-    const year = now.getUTCFullYear();
-    return Number(month) < now.getUTCMonth() + 1 ? year + 1 : year;
+function inferYear() {
+    return new Date().getUTCFullYear();
 }
 
 /**
@@ -54,14 +63,14 @@ export function parseDate(text) {
     const named = text.match(DATE_CZ_NAMED_RE);
     if (named) {
         const month = CZECH_MONTHS[named[2].toLowerCase()];
-        return toIsoDate(named[3] || inferYear(month), month, named[1]);
+        return toIsoDate(named[3] || inferYear(), month, named[1]);
     }
 
     const numeric = text.match(DATE_CZ_NUMERIC_RE);
     if (numeric) return toIsoDate(numeric[3], numeric[2], numeric[1]);
 
     const noYear = text.match(DATE_CZ_NO_YEAR_RE);
-    if (noYear) return toIsoDate(inferYear(noYear[2]), noYear[2], noYear[1]);
+    if (noYear) return toIsoDate(inferYear(), noYear[2], noYear[1]);
 
     return null;
 }

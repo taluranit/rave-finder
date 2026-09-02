@@ -1,13 +1,16 @@
 /**
  * Seed list of data sources for Czech electronic music events (v1 scope: Czech Republic only).
  *
- * Two kinds of sources:
- *  - CLUB_SITES: individual venue websites. These have no structured API, so they are
- *    fetched via the `apify/website-content-crawler` Actor (page text as Markdown) and
- *    then parsed with date/keyword heuristics in src/crawlers/clubSiteCrawler.js.
- *  - AGGREGATOR_SITES: event listing/ticketing sites that cover many venues. These are
- *    crawled directly (src/crawlers/aggregatorCrawler.js), preferring embedded JSON-LD
- *    Event data where the site provides it, and falling back to HTML heuristics.
+ * Two kinds of sources, both crawled directly with Crawlee (free, no Actor call) and both
+ * using the shared extractors in src/extractors/ — schema.org JSON-LD where a site publishes
+ * it, otherwise date-bearing event cards read out of the DOM:
+ *  - CLUB_SITES: individual venue websites (src/crawlers/clubSiteCrawler.js).
+ *  - AGGREGATOR_SITES: event listing/ticketing sites covering many venues
+ *    (src/crawlers/aggregatorCrawler.js).
+ *
+ * `locationSuffixMarker` / `titlePrefixRe` are per-source title cleanups for aggregators that
+ * pack the venue and town into the event title — see splitLocationSuffix in the aggregator
+ * crawler.
  *
  * `confidence` reflects how reliable the source's genre tagging / event data is expected
  * to be, and is carried through to the output `confidence` field unless a later stage
@@ -65,7 +68,11 @@ export const AGGREGATOR_SITES = [
     // heuristically-parsed club pages. GoOut's listing here is specifically its electronic
     // music category, and Rave.cz is an electronic-only partylist, so both are trusted outright.
     { name: 'GoOut', url: 'https://goout.net', listingUrl: 'https://goout.net/cs/akce/hudba/elektronicka-hudba/', confidence: 'moderate', trustedElectronic: true },
-    { name: 'DnB e-Heard', url: 'https://dnbeheard.cz', listingUrl: 'https://dnbeheard.cz/kalendar-akci', confidence: 'high', forcedGenre: 'drum_and_bass' },
+    // A year-round national D&B calendar: ~501 entries, each written "#Town Title, Venue ~ …",
+    // which cityFromHashPrefix parses. Most are in the past by the time any given run reads it
+    // (the page opens in January regardless of the month) and get dropped by the date filter;
+    // what's left is the best regional coverage of any source here, Ostrava included.
+    { name: 'DnB e-Heard', url: 'https://dnbeheard.cz', listingUrl: 'https://dnbeheard.cz/kalendar-akci', confidence: 'high', forcedGenre: 'drum_and_bass', cityFromHashPrefix: true },
     { name: 'ColosseumTicket', url: 'https://www.colosseumticket.cz', listingUrl: 'https://www.colosseumticket.cz', confidence: 'moderate' },
     { name: 'KdyKde.cz', url: 'https://www.kdykde.cz', listingUrl: 'https://www.kdykde.cz', confidence: 'moderate' },
     { name: 'xTicket', url: 'https://www.xticket.cz', listingUrl: 'https://www.xticket.cz/koncerty-festivaly', confidence: 'moderate' },

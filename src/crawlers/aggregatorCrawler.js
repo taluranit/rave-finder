@@ -5,11 +5,14 @@ import { extractJsonLdEvents } from '../extractors/jsonLdEvents.js';
 import { extractEventCards } from '../extractors/eventCards.js';
 import { parseDate, stripDates } from '../extractors/dates.js';
 
-// Any single listing page producing more than this is misreading the page — see the check
-// in the request handler. Sized to fit a genuinely large genre calendar: jiripetrak.cz
-// legitimately lists ~143 upcoming parties nationwide, and the earlier 120 cap would have
-// discarded the lot as misextraction.
-const MAX_EVENTS_PER_AGGREGATOR = 250;
+// Any single listing page producing more than this is misreading the page — see the check in
+// the request handler. Sized to fit the genuinely large genre calendars: jiripetrak.cz lists
+// ~143 upcoming parties nationwide and dnbeheard.cz publishes a full year at ~501, so the
+// original 120 discarded both as misextraction. The cap exists to stop junk from swamping the
+// run's geocoding budget, and that concern is now handled better upstream — the city-level
+// pre-filter geocodes each distinct city once and caches it, so cost scales with towns, not
+// events.
+const MAX_EVENTS_PER_AGGREGATOR = 600;
 
 /**
  * Splits a trailing "▼ Venue, Town" location off an event title, for sources that append one.
@@ -24,7 +27,35 @@ const MAX_EVENTS_PER_AGGREGATOR = 250;
  * "Německé delikatesy u Philipa, Radotín, Praha"); with no comma it's a venue name on its own
  * ("BrickHouse DOV"), left for the geocoder to resolve by name.
  */
+/**
+ * Splits a leading "#Town Title, Venue ~ trailing junk" into its parts.
+ *
+ * dnbeheard.cz writes every entry this way ("#Ostrava DNB 90's, Fabric ~ FB event link"), and
+ * it's worth a rule for the same reason as the suffix format: it's a year-round national D&B
+ * calendar, and the hashtag is a clean town name for the radius filter.
+ */
+function splitHashPrefix(title) {
+    // Searched anywhere rather than anchored at the start: a multi-day entry keeps a leading
+    // date fragment ("4. &  #Krucemburk Spring BassJam"), and anchoring dropped the town for
+    // every one of those. Requires an uppercase-initial word so the "#6" in "brickHOUSE #6"
+    // isn't mistaken for a town tag.
+    const match = title.match(/#(\p{Lu}\p{L}+)\s+([\s\S]+)$/u);
+    if (!match) return { eventName: title, venue: '', city: '' };
+
+    // The town is written as one CamelCase word ("#ČeskáLípa", "#FrýdekMístek"); split it back
+    // into words so Nominatim can resolve it.
+    const city = match[1].replace(/(\p{Ll})(\p{Lu})/gu, '$1 $2');
+    const rest = match[2].replace(/\s*~.*$/, '').trim();
+    const parts = rest.split(',').map((part) => part.trim()).filter(Boolean);
+    return {
+        eventName: parts[0] || rest,
+        venue: parts.length > 1 ? parts.slice(1).join(', ') : '',
+        city,
+    };
+}
+
 function splitLocationSuffix(title, source) {
+    if (source.cityFromHashPrefix) return splitHashPrefix(title);
     const marker = source.locationSuffixMarker;
     const cleanTitle = source.titlePrefixRe ? title.replace(source.titlePrefixRe, '').trim() : title;
     if (!marker) return { eventName: cleanTitle, venue: '', city: '' };
