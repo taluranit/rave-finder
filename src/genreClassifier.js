@@ -21,19 +21,30 @@ const SPECIFIC_GENRE_KEYWORDS = {
 // Matched as whole words, never as substrings: "rave" inside "Morava"/"Moravec"/"Moravský"
 // and "techno" inside "technologie"/"technika" are all common Czech words, and substring
 // matching on them produced confident nonsense.
-const GENERIC_ELECTRONIC_KEYWORDS = [
+// Split into strong and weak because *where* a word appears decides whether it means
+// anything. A live run surfaced a Rammstein tribute act as an electronic event: its title
+// says "Live Tribute Act To RAMMSTEIN", and it qualified purely because the word "party"
+// appeared somewhere in a long Facebook description. Meanwhile an "80s/90s hits" night at the
+// same venue qualified on "dj" in its description, which is genuinely what it is.
+//
+// So: strong words count anywhere, including descriptions. Weak ones only count in the title.
+// "bass" is weak for exactly this reason — in a rock band's description it's a guitar.
+const STRONG_ELECTRONIC_KEYWORDS = [
     'dj', 'djs', 'djane', 'djs?ka', 'electronic', 'elektronick', 'elektronika', 'edm', 'rave',
-    // Lineup/set vocabulary — how a DJ night is written when it names no genre.
-    'b2b', 'dj set', 'live set', 'line-?up', 'afterparty', 'after party', 'warm-?up',
-    // "bass"/"beat(s)" are strong electronic markers in event titles ("BASS'N'KEBAB",
-    // "Spring BassJam", "FUNKY BEAT DAY") and don't collide with the rock/metal and
-    // community-event titles these sources are otherwise full of.
-    'bass', 'beat', 'beats', 'breakbeat', 'dubstep', 'trance', 'hardstyle', 'psytrance',
-    'disco', 'diskotéka', 'diskoteka', 'party', 'párty', 'mejdan', 'open air', 'openair',
+    'b2b', 'dj set', 'live set', 'line-?up',
+    'dubstep', 'trance', 'hardstyle', 'psytrance', 'breakbeat', 'diskotéka', 'diskoteka',
 ];
-// Deliberately not on the list: a bare "live", which would match "Live Tribute Act To
-// RAMMSTEIN"; and "tanečn"/"dance", which match ballroom and folk-dance events.
-const GENERIC_ELECTRONIC_RE = new RegExp(`\\b(${GENERIC_ELECTRONIC_KEYWORDS.join('|')})\\b`, 'i');
+const WEAK_ELECTRONIC_KEYWORDS = [
+    'bass', 'beat', 'beats', 'disco', 'party', 'párty', 'mejdan', 'open air', 'openair',
+    // "afterparty" and "warm-up" read like electronic vocabulary but aren't: a metal gig's
+    // description advertises an after party in the club just as readily, and warm-up is
+    // mostly sport. Fine in a title, meaningless buried in prose.
+    'afterparty', 'after party', 'warm-?up',
+];
+// Deliberately absent: a bare "live", which matches "Live Tribute Act To RAMMSTEIN"; and
+// "tanečn"/"dance", which match ballroom and folk-dance events.
+const STRONG_ELECTRONIC_RE = new RegExp(`\\b(${STRONG_ELECTRONIC_KEYWORDS.join('|')})\\b`, 'i');
+const WEAK_ELECTRONIC_RE = new RegExp(`\\b(${WEAK_ELECTRONIC_KEYWORDS.join('|')})\\b`, 'i');
 
 // Named electronic events/promoters whose titles carry no genre word at all. Kept short and
 // specific — a brand list is a maintenance burden, justified only for events big enough that
@@ -73,17 +84,23 @@ export function classifyGenres(text, knownGenres = []) {
     return [...genres];
 }
 
-function matchesGenericElectronicSignal(text) {
-    const haystack = text || '';
-    // "w/" is checked separately from the word list because it isn't a word — it's the
+function matchesGenericElectronicSignal(title, description) {
+    const strongHaystack = `${title || ''} ${description || ''}`;
+    // "w/" is checked separately from the word lists because it isn't a word — it's the
     // lineup separator in titles like "EXPERIENCE ♡ w/ KRYDER", and requires a following
     // name so a stray "w/o" or "w/e" doesn't count.
-    return GENERIC_ELECTRONIC_RE.test(haystack) || KNOWN_BRAND_RE.test(haystack) || /\sw\/\s*\p{L}{2,}/u.test(haystack);
+    if (STRONG_ELECTRONIC_RE.test(strongHaystack)) return true;
+    if (KNOWN_BRAND_RE.test(strongHaystack)) return true;
+    if (/\sw\/\s*\p{L}{2,}/u.test(strongHaystack)) return true;
+    return WEAK_ELECTRONIC_RE.test(title || '');
 }
 
-/** True if `text` matches a specific genre keyword or the generic electronic/DJ vocabulary. */
+/**
+ * True if `text` matches a specific genre keyword or the generic electronic/DJ vocabulary.
+ * Treats `text` as a title, so weak keywords count — it's used on link text.
+ */
 export function looksElectronic(text) {
-    return classifyGenres(text).length > 0 || matchesGenericElectronicSignal(text);
+    return classifyGenres(text).length > 0 || matchesGenericElectronicSignal(text, '');
 }
 
 /**
@@ -99,17 +116,21 @@ export function looksElectronic(text) {
  *   is what a general-purpose ticketing aggregator or mixed-programming venue needs, so a
  *   rock/jazz/theater listing there doesn't get pulled in.
  *
- * @param {string} text
+ * Title and description are passed separately on purpose — see the keyword lists above for
+ * why a word's position changes what it's worth.
+ *
+ * @param {string} title
  * @param {object} [options]
+ * @param {string} [options.description]
  * @param {boolean} [options.trustedElectronic]
  * @param {string[]} [options.knownGenres]
  * @returns {string[]} genres to tag the event with, or [] to drop it.
  */
-export function classifyForInclusion(text, { trustedElectronic = false, knownGenres = [] } = {}) {
-    const specific = classifyGenres(text, knownGenres);
+export function classifyForInclusion(title, { description = '', trustedElectronic = false, knownGenres = [] } = {}) {
+    const specific = classifyGenres(`${title || ''} ${description}`, knownGenres);
     if (specific.length > 0) return specific;
     if (trustedElectronic) return ['electronic'];
-    if (matchesGenericElectronicSignal(text)) return ['electronic'];
+    if (matchesGenericElectronicSignal(title, description)) return ['electronic'];
     return [];
 }
 

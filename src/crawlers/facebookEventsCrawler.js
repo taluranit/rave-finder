@@ -79,7 +79,7 @@ export async function crawlFacebookEvents({ genres, city, searchCities = [], max
         const description = item.description || '';
         // Not trusted outright: Facebook's own search isn't reliably location- or
         // genre-scoped (see README), so an event still needs its own electronic/DJ signal.
-        const genresMatched = classifyForInclusion(`${eventName} ${description}`);
+        const genresMatched = classifyForInclusion(eventName, { description });
         if (genresMatched.length === 0) continue;
 
         results.push({
@@ -180,7 +180,8 @@ export async function crawlFacebookVenuePages({ venues, maxFacebookEvents }) {
             continue;
         }
 
-        const genres = classifyForInclusion(`${eventName} ${description}`, {
+        const genres = classifyForInclusion(eventName, {
+            description,
             // An event on a known electronic venue's own page inherits that venue's trust —
             // the same reasoning as trustedElectronic for seeded club sites. It's what lets a
             // DJ night whose title names no genre survive. It does also let the venue's

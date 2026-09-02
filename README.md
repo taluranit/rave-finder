@@ -22,19 +22,27 @@ Events. Optionally sends you a periodic email digest of newly found events.
      RA areas are city/region level — Prague and Brno have their own, smaller towns like
      Ostrava and Frýdek-Místek don't — so this queries the country-wide "All Czech Republic"
      area and lets the radius filter do the geography.
-   - **Aggregators** — listing sites, preferring their embedded JSON-LD event data where
-     available, with a heuristic HTML fallback otherwise.
-   - **Club sites (seeded list)** — no structured data, so pages are fetched via the
-     [`apify/website-content-crawler`](https://apify.com/apify/website-content-crawler)
-     Actor (free `cheerio` mode) and parsed with date/keyword heuristics. Best-effort by
-     nature — see comments in `src/crawlers/clubSiteCrawler.js`. A live test confirmed some
-     club program pages are JS-rendered and return thin/unrelated content under the free
-     `cheerio` mode (e.g. a static news archive instead of the real upcoming program). The
-     Actor's other crawler modes render JS correctly, but are billed via
-     [x402](https://blog.apify.com/introducing-x402-agentic-payments/) — a crypto/USDC
-     payment rail separate from a normal Apify account — which isn't worth the trade-off
-     here, so this stays on `cheerio`. Aggregators and Facebook Events carry more of the
-     real signal as a result.
+   - **Aggregators and club sites** — both crawled directly with Crawlee (free, no Actor
+     call) through the shared extractors in `src/extractors/`, in three tiers: schema.org
+     JSON-LD where a site publishes it, then DOM event cards, then dated links.
+
+     This replaced an earlier pipeline that ran each club site through
+     [`apify/website-content-crawler`](https://apify.com/apify/website-content-crawler) and
+     parsed the resulting Markdown. That version found **0 events across 13 sites** on two
+     separate runs, and the sites were never the problem:
+
+     - Markdown flattening destroyed the card structure tying a date to its title. rokac.cz
+       has 9 upcoming events in plain server-rendered HTML; the line heuristic saw none.
+     - Nothing walked *nested* JSON-LD, so barrak.cz's 67 fully-structured events were
+       invisible — they hang off a `LocalBusiness` object's `events` property.
+     - It cost a paid Actor call and a concurrent-run slot per site, with 30–150s of
+       container startup each, for no return.
+
+     Crawling directly is free, needs no concurrency slot, and covers all 13 sites in about
+     1.5 seconds. The JS rendering the Actor charged for was never what was missing; these
+     are ordinary server-rendered pages. Two per-source title rules
+     (`locationSuffixMarker`, `cityFromHashPrefix`) parse the venue and town out of titles
+     on the two national genre calendars, which is what makes their events placeable at all.
    - **Club sites (Maps-discovered)** — the seeded list only covers ~17 venues in a handful
      of cities, so it contributes nothing for a city outside that list. To cover any Czech
      city/radius, `src/crawlers/mapsDiscoveryCrawler.js` searches Google Maps
@@ -126,31 +134,37 @@ The search path is kept in the code and can be re-enabled with `includeFacebookE
 ## Actor-run budget
 
 Apify caps **concurrent Actor runs per account** (5 on the plan this was built against,
-*including this Actor's own run*), and `apify/website-content-crawler` defaults to 8192MB of
-memory per call — which also counts against a shared memory ceiling. Both limits were hit
-hard in testing, and failed silently-ish: every club-site crawl in a run aborted with
-"you will exceed your limit of 5 concurrent Actor runs" while the run itself still reported
-success with zero results.
+*including this Actor's own run*), and a called Actor's default memory counts against a
+shared ceiling too. Both limits were hit hard in testing, and failed silently-ish: every
+club-site crawl in a run aborted with "you will exceed your limit of 5 concurrent Actor runs"
+while the run itself still reported success and zero results.
 
-So the pipeline is deliberately phased rather than maximally parallel:
+Moving the club and aggregator crawls in-process removed most of that pressure — they now
+cost zero Actor slots. What remains is phased rather than maximally parallel:
 
 | Phase | What runs | Actor calls |
 |---|---|---|
 | 1 | Resident Advisor, aggregators, nearby-town lookup, Maps discovery | 1 (Maps only) |
-| 2 | Facebook Events (needs phase 1's town list) | 1 |
-| 3 | Club sites, in-range only, concurrency 3 | up to 3 at a time |
+| 2 | Facebook Events search (off by default) | 1 |
+| 3 | Club sites (in-process), then Facebook venue pages | 1 per venue page, 3 at a time |
+
+Facebook venue pages take **one Actor call per page**. Batching them into a single call looks
+cheaper but isn't: the scraper's `maxEvents` is a whole-run total, so whichever page it
+crawls first swallows the entire budget — a run with 6 pages and a cap of 20 returned 16
+events all from one venue, and the other five contributed nothing. One call per page with
+`maxEvents / pages` each costs the same and actually covers every venue.
 
 Free/keyless sources (Resident Advisor, Nominatim, Overpass) and the in-process Crawlee
-aggregator crawl cost **zero** Actor slots, which is a large part of why RA is the primary
-source. Each `website-content-crawler` call is also pinned to 512MB rather than its 8192MB
-default.
+crawls cost **zero** Actor slots.
 
-**Run timeout must be set on the Actor, not here.** `defaultRunOptions` is *not* a valid
-`actor.json` property (see Apify's actor.json reference) — putting it there is silently
-ignored, which cost one run an abort at the platform default of 300 seconds. Set the timeout
-in Apify Console under the Actor's Settings → Run options, or per-run under Input → Run
-options. A full run needs well over 300s: Facebook alone can spend several minutes, and
-geocoding is rate-limited to 1 request/second by Nominatim's usage policy.
+**The 300-second default run timeout is now the design constraint, not a problem to raise.**
+Note that `defaultRunOptions` is *not* a valid `actor.json` property (see Apify's actor.json
+reference) — putting it there is silently ignored, which cost one early run an abort. It can
+only be changed in Apify Console under Settings → Run options. Since the paid per-site crawls
+are gone, a full run finishes well inside the default, and the earlier deadline-and-skip
+machinery has been removed. The remaining slow step is geocoding, rate-limited to 1 request
+per second by Nominatim's usage policy — which is why events are filtered by city first
+(geocoding each distinct town once, cached) before any venue is geocoded individually.
 
 ## Input
 
@@ -212,6 +226,9 @@ first `apify run`, or by running `apify run --input '{"city": "Brno"}'` (see the
 src/main.js                Pipeline orchestration
 src/sources/seedSources.js Seed list of club sites and aggregators
 src/crawlers/               One crawler module per source type
+src/extractors/dates.js     Czech date formats (ISO, numeric, named month, year-less)
+src/extractors/jsonLdEvents.js  Recursive schema.org Event extraction, any nesting depth
+src/extractors/eventCards.js    DOM event-card extraction, for pages without JSON-LD
 src/nearbyTowns.js          Real towns within the radius (Overpass), for Facebook search
 src/concurrency.js          Bounded-concurrency helper for crawling many sites in parallel
 src/geocode.js              Nominatim geocoding + Haversine distance, KV-cached
@@ -223,28 +240,33 @@ Dockerfile                  apify/actor-node base image
 
 ## Known limitations (v1)
 
-- Club-site and non-JSON-LD aggregator extraction is heuristic (date-pattern + keyword
-  matching over page text), not a real per-site scraper — it will miss events on
-  unusually-structured pages and occasionally misfire. This is a documented, accepted
-  trade-off for v1 rather than building and maintaining ~20 bespoke site scrapers.
-- Genre/electronic-music detection is still keyword-based for anything not from a
-  `trustedElectronic` source — a branded event on a mixed-programming venue or general
-  ticketing aggregator that names neither a genre nor "DJ" anywhere in its listing (e.g. just
-  an artist name) will still be missed. Found while investigating a real gap: Beats for Love
-  Experience (a satellite series at Nová Osmička in Frýdek-Místek) only survives because its
-  listings mention specific DJs/genres — a bare artist-only listing wouldn't.
+- Non-JSON-LD extraction is generic (event cards keyed off a date, plus a dated-link
+  fallback), not a per-site scraper, so it will miss events on unusually-structured pages.
+  This is an accepted trade-off rather than maintaining ~20 bespoke scrapers, but it does
+  fail visibly on some sites: dnbczevents.cz groups listings under day headers, so every
+  event resolves to the weekday above it ("pátek", "sobota"). Dates are read correctly; only
+  the titles need a site-specific selector.
+- Dates written without a year are assumed to be the **current** year, which means a
+  genuinely next-January event listed as "9. 1." will be dated this January and dropped.
+  Deliberate: the alternative (rolling past months forward) turned dnbeheard.cz's 501
+  entries into a wall of January-2027 parties that don't exist. A miss is a gap in coverage;
+  a phantom is wrong data in the digest.
+- Genre/electronic-music detection is keyword-based for anything not from a
+  `trustedElectronic` source. The vocabulary covers genre names, lineup notation (`w/`, `b2b`,
+  `dj set`, `DJane`), the bass/beat/trance word family, and a short list of named brands
+  (Beats for Love, Let It Roll). A listing that names none of those — just a bare artist name
+  — is still missed. The gate is tested against 29 real titles from these sources: all 10
+  electronic ones match and all 19 rock/metal/community ones don't ("Live Tribute Act To
+  RAMMSTEIN", "Moravský ples", "Taneční kurz pro dospělé").
 - Scope is Czech Republic only.
-- **Two genre-specific party calendars are found but not wired up.**
+- **The two national D&B/techno calendars are now the highest-yield sources**, both read by
+  the card extractor with a small per-source title rule:
   [jiripetrak.cz](https://www.jiripetrak.cz/cs/drum-a-bass-a-techno-parties-kalendar-akci-44/)
-  (33 upcoming events when checked, Beats for Love among them) and
-  [dnbczevents.cz](https://dnbczevents.cz/akce.php) are dedicated D&B/techno listings — the
-  most on-target free sources found so far. They're parked in
-  `CANDIDATE_AGGREGATORS_NEEDING_CUSTOM_EXTRACTION` because the generic heuristic extractor
-  can't read them: it scans every dated `<a>`, and a live test pulled 886 "events" out of
-  dnbczevents.cz that were nav links, city names and DJ names. Junk candidates aren't just
-  untidy — each costs a geocoding call at 1 req/sec, so one misread page exhausts the run's
-  time budget. Enabling them needs per-site parsing against their real DOM. Highest-value
-  remaining work.
+  (143 upcoming events, all carrying "▼ Venue, Town") and
+  [dnbeheard.cz](https://dnbeheard.cz/kalendar-akci) (a full year at ~501, written
+  "#Town Title, Venue", 500 of which parse to a town). Only
+  [dnbczevents.cz](https://dnbczevents.cz/akce.php) remains parked in
+  `CANDIDATE_AGGREGATORS_NEEDING_CUSTOM_EXTRACTION`.
 - **Resident Advisor doesn't help outside Prague/Brno.** Its Czech coverage is
   Prague-centric: of ~115 upcoming events, 105 are Prague, 3 Brno. For a search near a
   smaller town it contributes candidates but no results — the nearest listing to Návsí was
@@ -256,12 +278,21 @@ Dockerfile                  apify/actor-node base image
   silently ignored in testing, and venue/performer data appears to need an `include=`
   parameter. Until that's worked out, GoOut is still just being HTML-scraped like the other
   aggregators. Worth doing — it's probably the biggest remaining coverage win.
-- **Facebook venue pages aren't used directly.** Maps discovery often returns a venue's
-  Facebook page as its website; those are now skipped rather than crawled (cheerio can't read
-  facebook.com anyway). Feeding them to `facebook-events-scraper` as `startUrls` would likely
-  be the single best data path for small venues that publish only to Facebook — but that
-  Actor documents `startUrls` as event/search/explore URLs, not venue page URLs, so it needs
-  a cheap live test before being relied on.
+- **A Facebook venue page is only worth seeding once it's confirmed to host events, and most
+  don't.** Four researched-but-unvalidated pages (TESLA Production/Třinec, PartyTime and
+  Project Bar, DNB pro Ostravaky) were seeded and every one returned "No event detail URLs
+  found". The slugs were all real; the pages simply host nothing. Checking two by hand showed
+  why, and it's a regional pattern: TESLA's events tab reads "No events to show" with only
+  past entries, and PartyTime's page has no events tab at all. Around here the **promoter**
+  creates the event and merely tags the venue — TESLA's own feed advertises "Future Control
+  Open Air 2026", hosted by a separate Future Control page. Promoter pages are the better
+  target, but finding them needs a logged-in Facebook search this Actor can't perform, so
+  they have to be added by hand.
+- **Slovak and Polish events near the eastern border are dropped**, because scope is
+  Czech-only and every place name is geocoded with ", Czech Republic" appended. That's a real
+  gap for a border town rather than a theoretical one: from Návsí, Žilina (SK) is 40km and
+  Cieszyn (PL) 20km, while Prague is 316km — and dnbeheard.cz does list Žilina D&B nights.
+  They fail to geocode and are discarded as unplaceable.
 - The Facebook Events search relies on `apify/facebook-events-scraper`'s own search
   behavior; there's no guarantee of full coverage for a given city/genre. Confirmed via a
   live test that its search isn't reliably location-scoped — a query like "drum and bass

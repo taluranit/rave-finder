@@ -59,7 +59,8 @@ export async function crawlClubSites(sources = CLUB_SITES) {
             // what another site already contributed.
             const kept = [];
             for (const event of extracted) {
-                const genres = classifyForInclusion(`${event.eventName} ${event.description || ''}`, {
+                const genres = classifyForInclusion(event.eventName, {
+                    description: event.description || '',
                     trustedElectronic: source.trustedElectronic,
                     knownGenres: source.genreFocus,
                 });

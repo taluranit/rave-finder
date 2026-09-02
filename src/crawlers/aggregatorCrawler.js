@@ -154,7 +154,7 @@ export async function crawlAggregators() {
             for (const event of events) {
                 const genres = source.forcedGenre
                     ? [source.forcedGenre]
-                    : classifyForInclusion(`${event.eventName} ${event.description}`, { trustedElectronic: source.trustedElectronic });
+                    : classifyForInclusion(event.eventName, { description: event.description, trustedElectronic: source.trustedElectronic });
                 if (genres.length === 0) continue; // not an electronic-music event we can tag
 
                 kept.push({

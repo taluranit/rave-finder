@@ -145,6 +145,8 @@ export async function crawlResidentAdvisor({ dateRangeDays }) {
 
             const raGenreNames = (event.genres ?? []).map((g) => g.name).filter(Boolean);
             const artistNames = (event.artists ?? []).map((a) => a.name).filter(Boolean);
+            // RA's own genre labels are structural metadata, not prose, so they're joined to
+            // the title rather than passed as a description — a weak keyword in them is meant.
             const genres = classifyForInclusion(`${event.title} ${raGenreNames.join(' ')}`, {
                 trustedElectronic: true,
                 knownGenres: mapRaGenres(raGenreNames),
