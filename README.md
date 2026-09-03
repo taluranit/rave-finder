@@ -131,6 +131,14 @@ there, just on venue and promoter **pages** rather than anywhere the event searc
 That's what `crawlFacebookVenuePages` does — it asks named, already-in-range venues what they
 have on, so cost scales with the number of nearby venues instead of with search noise.
 
+## Icon
+
+The Actor's icon lives at `.actor/logo.png` (512x512 PNG) so it's versioned with the project,
+but **Apify does not pick it up from the repo** — `actor.json` has no icon property, and the
+build ignores the file. It has to be uploaded once in Apify Console under
+**Publication → Display information → Actor logo**. Re-uploading is only needed when the
+image itself changes; it survives every rebuild.
+
 ## Actor-run budget
 
 Apify caps **concurrent Actor runs per account** (5 on the plan this was built against,
@@ -230,6 +238,7 @@ first `apify run`, or by running `apify run --input '{"city": "Brno"}'` (see the
 
 ```
 .actor/actor.json          Actor metadata
+.actor/logo.png            Store/Console icon, 512x512 (upload via Console — see below)
 .actor/input_schema.json   Input schema
 src/main.js                Pipeline orchestration
 src/sources/seedSources.js Seed list of club sites and aggregators
