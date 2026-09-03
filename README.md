@@ -65,19 +65,6 @@ Events. Optionally sends you a periodic email digest of newly found events.
      non-music filter — a live run otherwise surfaced a wine-and-burčák tasting. The filter
      drops tastings, workshops, yoga, tournaments and markets while deliberately keeping
      anything that might be a DJ night.
-   - **Facebook Events search** — via
-     [`apify/facebook-events-scraper`](https://apify.com/apify/facebook-events-scraper),
-     searched by genre + the **towns Facebook actually indexes** near your search point (no
-     hardcoded page list). **Off by default** (`includeFacebookEvents: false`) — see
-     "Why Facebook search is off" below. It costs ~$0.013/event when enabled.
-     Searching the literal input city was a mistake worth documenting: Facebook's event
-     search is keyword matching, *not* a location filter. Verified live for "Návsí" —
-     techno/house/electronic each returned "No events found", while "drum and bass Návsí"
-     silently ignored the place and returned ~150 global D&B events from Coventry, Budapest
-     and Brooklyn, all of which the radius filter then correctly discarded. So the whole
-     paid call was spent on noise. `src/nearbyTowns.js` now resolves real towns within the
-     radius via OpenStreetMap's Overpass API (free, keyless) — for Návsí+50km that's
-     Ostrava, Žilina, Havířov, Frýdek-Místek and so on — and those get searched instead.
 3. Classifies each event's genre(s) — see `src/genreClassifier.js`:
    - Structural tags win outright (e.g. DnB e-Heard's `forcedGenre: 'drum_and_bass'`).
    - A specific genre keyword (techno/house/drum & bass, CZ + EN, word-boundary matched —
@@ -89,10 +76,13 @@ Events. Optionally sends you a periodic email digest of newly found events.
      tagged generically as `electronic`. This is what makes a branded event like "Beats for
      Love Experience w/ KANINE" or a local party name survive even though its title names no
      genre — the source itself is the guarantee.
-   - Everywhere else (general ticketing aggregators, mixed-programming clubs, Facebook
-     search results), an event only survives if its own text carries a generic
-     electronic/DJ signal ("dj", "electronic", "elektronika", "edm", "rave") — this is what
-     keeps rock/jazz/theater listings on those same sources from flooding the output.
+   - Everywhere else (general ticketing aggregators, mixed-programming clubs, Facebook venue
+     pages), an event only survives if its own text carries a generic electronic/DJ signal.
+     Strong signals ("dj", "DJane", "b2b", "dj set", "dubstep", "trance") count anywhere
+     including the description; weak ones ("bass", "beat", "party", "disco", "afterparty")
+     count only in the title, because in a rock band's description "bass" is a guitar and a
+     metal gig advertises an afterparty just as readily. This is what keeps rock/jazz/theatre
+     listings on those same sources from flooding the output.
 4. Geocodes each venue and filters by distance from the city center — cached in the
    key-value store, except Maps-discovered venues and Resident Advisor events, which already
    carry their own coordinates or a street address.
@@ -107,29 +97,39 @@ Events. Optionally sends you a periodic email digest of newly found events.
 6. Pushes the results to the default dataset.
 7. If you gave a `subscriberEmail`, sends an email digest of newly found events (see below).
 
-## Why Facebook search is off
+## Why Facebook's event search was removed
 
-Facebook's event search OR-matches instead of filtering, and both failure modes were hit in
-live testing:
+Facebook's event search is keyword matching, not a location filter, so the place name in a
+query is advisory at best. It was tried three ways and each failed differently:
 
-- Searching the literal input city ignored the *place*: "drum and bass Návsí" returned ~150
-  global D&B events from Coventry, Budapest and Brooklyn.
-- Searching real nearby towns ignored the *genre*: "drum and bass Havířov" returned every
-  unrelated event in Havířov — maternity-ward tours, yoga classes, a dog-school race,
-  board-game nights.
+- **The literal input city ignored the place.** "drum and bass Návsí" returned ~150 global
+  D&B events from Coventry, Budapest and Brooklyn.
+- **Real nearby towns ignored the genre.** "drum and bass Havířov" returned every unrelated
+  event in Havířov — maternity-ward tours, yoga classes, a dog-school race, board-game nights.
+- **Enabling it aborts the whole run.** This is what settled it. A Návsí search with
+  `includeFacebookEvents: true` spent the entire 300-second budget inside the scraper and was
+  killed by the platform, so **nothing was pushed at all** — every other source's results
+  were discarded too. It also drew Facebook's own "Rate limit exceeded" and looped on
+  pagination retries ("Forcing additional scrolling", retryCount past 10).
 
-Either way the events are billed at ~$0.013 each *before* this Actor's genre and radius
-filters discard them, and one run spent its entire 300-second budget on Facebook while
-surfacing no electronic events for the searched region at all.
+That run's harvest was three distinct kinds of garbage, none of it near Návsí:
 
-This is a limitation of the *search* index, not of Facebook as a source — small promoters
-genuinely do publish there, but on venue and promoter **pages** rather than anywhere the
-event search reaches. The promising direction is therefore to feed known venue pages to the
-scraper as `startUrls`; Maps discovery already surfaces venue Facebook pages (currently
-skipped, since `cheerio` can't read facebook.com). That Actor documents `startUrls` as
-event/search/explore URLs rather than page URLs, so it needs a cheap live test first.
+- **Jazz rhythm sections**, because the search ORs the words. "drum and bass Karviná" kept
+  returning "Joan Minor featuring The Uli Geissendoerfer Trio with Peppe on Drums and Derek
+  Jones on the Bass" — seven times over, under seven different event ids.
+- **The town's unrelated events**: a political-party barbecue (GRILOVAČKA ČSSD KARVINÁ), a
+  kids' craft workshop (Lapač slunce), an open day, a photography course.
+- **Real D&B on the wrong continent**: Budapest Park, Poland, the US.
 
-The search path is kept in the code and can be re-enabled with `includeFacebookEvents: true`.
+Every one of those is billed at ~$0.013 *before* this Actor's genre and radius filters throw
+it away. A default-off switch wasn't enough protection, since flipping it guarantees a lost
+run, so the path is deleted — recoverable from git history if a different approach ever
+warrants it.
+
+None of this is a limitation of Facebook *as a source*: small promoters genuinely do publish
+there, just on venue and promoter **pages** rather than anywhere the event search reaches.
+That's what `crawlFacebookVenuePages` does — it asks named, already-in-range venues what they
+have on, so cost scales with the number of nearby venues instead of with search noise.
 
 ## Actor-run budget
 
@@ -145,8 +145,7 @@ cost zero Actor slots. What remains is phased rather than maximally parallel:
 | Phase | What runs | Actor calls |
 |---|---|---|
 | 1 | Resident Advisor, aggregators, nearby-town lookup, Maps discovery | 1 (Maps only) |
-| 2 | Facebook Events search (off by default) | 1 |
-| 3 | Club sites (in-process), then Facebook venue pages | 1 per venue page, 3 at a time |
+| 2 | Club sites (in-process), then Facebook venue pages | 1 per venue page, 3 at a time |
 
 Facebook venue pages take **one Actor call per page**. Batching them into a single call looks
 cheaper but isn't: the scraper's `maxEvents` is a whole-run total, so whichever page it
@@ -157,7 +156,16 @@ events all from one venue, and the other five contributed nothing. One call per 
 Free/keyless sources (Resident Advisor, Nominatim, Overpass) and the in-process Crawlee
 crawls cost **zero** Actor slots.
 
-**The 300-second default run timeout is now the design constraint, not a problem to raise.**
+**A run that overshoots the timeout publishes nothing.** Everything is pushed in one call at
+the end, so an abort doesn't degrade the output, it destroys it — including work every other
+source already finished. Geocoding is the only step that can still get there (1 request/second
+under Nominatim's policy, and a failed lookup is retried three times with backoff — a Návsí
+run had 17 unplaceable venues at roughly 6s each), so it stops starting new lookups 45s before
+the assumed 300s limit and publishes what it placed, logging a warning. A normal run finishes
+in about 130s locally, so this is a safety net rather than something you should hit; because
+successful lookups are cached in the key-value store, a re-run gets further.
+
+**The 300-second default run timeout is the design constraint, not a problem to raise.**
 Note that `defaultRunOptions` is *not* a valid `actor.json` property (see Apify's actor.json
 reference) — putting it there is silently ignored, which cost one early run an abort. It can
 only be changed in Apify Console under Settings → Run options. Since the paid per-site crawls
@@ -174,8 +182,8 @@ per second by Nominatim's usage policy — which is why events are filtered by c
 | `radiusKm` | integer | `30` | Max distance from the city center, in km (1–300). |
 | `genres` | array | all four | `techno`, `house`, `drum_and_bass`, `electronic` (generic — electronic/DJ events with no specific genre named). |
 | `dateRangeDays` | integer | `30` | Only include events within this many days from now (1–180). |
-| `includeFacebookEvents` | boolean | `false` | Also search Facebook Events — off by default, see below. |
-| `maxFacebookEvents` | integer | `20` | Caps Facebook events fetched, to control cost. |
+| `includeFacebookVenuePages` | boolean | `true` | Ask in-range venues' Facebook pages what they have on. The only Facebook path — the event search was removed, see below. |
+| `maxFacebookEvents` | integer | `20` | Total budget for Facebook venue-page events, split evenly across the pages asked, to control cost. |
 | `maxMapsVenues` | integer | `5` | Caps Maps-discovered venues per search term, to control cost; `0` disables Maps discovery. Low by default — each discovered venue costs an Actor call, and most Maps hits are dance schools and bars, not electronic venues. |
 | `subscriberEmail` | string | *(none)* | If set, enables the email digest (see below). |
 | `digestFrequency` | enum | `weekly` | `daily` / `weekly` / `biweekly` / `monthly`. |
@@ -229,7 +237,6 @@ src/crawlers/               One crawler module per source type
 src/extractors/dates.js     Czech date formats (ISO, numeric, named month, year-less)
 src/extractors/jsonLdEvents.js  Recursive schema.org Event extraction, any nesting depth
 src/extractors/eventCards.js    DOM event-card extraction, for pages without JSON-LD
-src/nearbyTowns.js          Real towns within the radius (Overpass), for Facebook search
 src/concurrency.js          Bounded-concurrency helper for crawling many sites in parallel
 src/geocode.js              Nominatim geocoding + Haversine distance, KV-cached
 src/genreClassifier.js      Genre classification: specific keywords, trusted-source fallback
@@ -293,9 +300,8 @@ Dockerfile                  apify/actor-node base image
   gap for a border town rather than a theoretical one: from Návsí, Žilina (SK) is 40km and
   Cieszyn (PL) 20km, while Prague is 316km — and dnbeheard.cz does list Žilina D&B nights.
   They fail to geocode and are discarded as unplaceable.
-- The Facebook Events search relies on `apify/facebook-events-scraper`'s own search
-  behavior; there's no guarantee of full coverage for a given city/genre. Confirmed via a
-  live test that its search isn't reliably location-scoped — a query like "drum and bass
-  Brno" can return matching events from anywhere in the world. The radius filter later in
-  the pipeline drops these once venues are geocoded, so it's a wasted API call rather than
-  a wrong result, but coverage for the requested city is weaker than the query suggests.
+- **Facebook coverage is only as good as the hand-maintained venue list.** With the event
+  search gone (see above), the only Facebook path is asking named venue pages what they have
+  on — and finding the right pages needs a logged-in Facebook search this Actor can't do. In
+  the Návsí region the promoter creates the event and merely tags the venue, so promoter
+  pages are the better target and have to be added by hand.

@@ -27,10 +27,25 @@
             "editor": "select",
             "items": {
                 "type": "string",
-                "enum": ["techno", "house", "drum_and_bass", "electronic"],
-                "enumTitles": ["Techno", "House", "Drum & Bass", "Electronic (general)"]
+                "enum": [
+                    "techno",
+                    "house",
+                    "drum_and_bass",
+                    "electronic"
+                ],
+                "enumTitles": [
+                    "Techno",
+                    "House",
+                    "Drum & Bass",
+                    "Electronic (general)"
+                ]
             },
-            "default": ["techno", "house", "drum_and_bass", "electronic"]
+            "default": [
+                "techno",
+                "house",
+                "drum_and_bass",
+                "electronic"
+            ]
         },
         "dateRangeDays": {
             "title": "Date range (days)",
@@ -40,12 +55,6 @@
             "default": 30,
             "minimum": 1,
             "maximum": 180
-        },
-        "includeFacebookEvents": {
-            "title": "Include Facebook Events",
-            "type": "boolean",
-            "description": "Search Facebook Events in addition to the other sources (uses the apify/facebook-events-scraper Actor, ~$0.013/event). Off by default: Facebook's event search OR-matches rather than filtering, so it reliably returns either global genre matches or every unrelated event in the town, and in live testing it surfaced no electronic events for the searched region while consuming most of the run's time and budget. Turn it on if you want to try it for a bigger city.",
-            "default": false
         },
         "includeFacebookVenuePages": {
             "title": "Include Facebook events from nearby venue pages",
@@ -81,8 +90,18 @@
             "type": "string",
             "description": "How often to send the email digest. The Actor can run more often than this (e.g. on a daily schedule) — it will only actually send once enough time has passed since the last send.",
             "editor": "select",
-            "enum": ["daily", "weekly", "biweekly", "monthly"],
-            "enumTitles": ["Daily", "Weekly", "Every 2 weeks", "Monthly"],
+            "enum": [
+                "daily",
+                "weekly",
+                "biweekly",
+                "monthly"
+            ],
+            "enumTitles": [
+                "Daily",
+                "Weekly",
+                "Every 2 weeks",
+                "Monthly"
+            ],
             "default": "weekly"
         },
         "resendApiKey": {
@@ -93,5 +112,7 @@
             "isSecret": true
         }
     },
-    "required": ["city"]
+    "required": [
+        "city"
+    ]
 }

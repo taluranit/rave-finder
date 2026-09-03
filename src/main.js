@@ -2,10 +2,9 @@ import { Actor, log } from 'apify';
 import { crawlAggregators } from './crawlers/aggregatorCrawler.js';
 import { crawlClubSites } from './crawlers/clubSiteCrawler.js';
 import { discoverClubSitesViaMaps } from './crawlers/mapsDiscoveryCrawler.js';
-import { crawlFacebookEvents, crawlFacebookVenuePages } from './crawlers/facebookEventsCrawler.js';
+import { crawlFacebookVenuePages } from './crawlers/facebookEventsCrawler.js';
 import { crawlResidentAdvisor } from './crawlers/residentAdvisorCrawler.js';
 import { CLUB_SITES, FACEBOOK_VENUE_PAGES } from './sources/seedSources.js';
-import { findNearbyTowns } from './nearbyTowns.js';
 import { geocode, haversineDistanceKm } from './geocode.js';
 import { dedupeEvents } from './dedupe.js';
 import { maybeSendDigest } from './email.js';
@@ -20,6 +19,26 @@ const VENUE_CITY_SLACK_KM = 15;
 // Wider than the Czech Republic is across, so any "city" resolving further than this is a
 // mis-geocode rather than a real place — see cityIsPlausiblyInRange.
 const IMPLAUSIBLE_CITY_DISTANCE_KM = 1000;
+
+// Everything this Actor finds is pushed in a single call at the very end, so overshooting the
+// platform's run timeout doesn't degrade the output — it destroys it. A run aborted at 300s
+// publishes nothing, discarding work every other source already completed. That is not
+// hypothetical: enabling the (now removed) Facebook event search did exactly this.
+//
+// Geocoding is the only step that can still get there. Nominatim's usage policy caps us at 1
+// request/second and a lookup that fails is retried three times with backoff, so a batch of
+// unplaceable venues is expensive — a Návsí run had 17 of them, at roughly 6s each. A normal
+// run finishes in about 130s locally, so this deadline should never fire; it exists so that
+// when it does, the run still publishes what it managed to place.
+const ASSUMED_RUN_TIMEOUT_MS = 300_000;
+const OUTPUT_RESERVE_MS = 45_000;
+const runStartedAt = Date.now();
+const geocodingDeadline = runStartedAt + ASSUMED_RUN_TIMEOUT_MS - OUTPUT_RESERVE_MS;
+
+/** True once the time budget for new geocoding lookups is spent. */
+function outOfGeocodingTime() {
+    return Date.now() > geocodingDeadline;
+}
 
 // Appends ", Czech Republic" for Nominatim, unless the place already names the country —
 // e.g. a user typing "Návsí, Czech Republic" as the city input would otherwise end up
@@ -76,7 +95,6 @@ try {
         radiusKm = 30,
         genres = ['techno', 'house', 'drum_and_bass', 'electronic'],
         dateRangeDays = 30,
-        includeFacebookEvents = false,
         includeFacebookVenuePages = true,
         maxFacebookEvents = 20,
         maxMapsVenues = 5,
@@ -101,22 +119,15 @@ try {
     // everything at once blew straight through it and failed every club-site crawl outright.
     //
     // Phase 1 — sources that cost no Actor slots at all (aggregators run in-process via
-    // Crawlee; Resident Advisor and the nearby-town lookup are plain HTTPS calls to free,
-    // keyless APIs), plus Maps discovery, which is the one Actor call here.
-    const [aggregatorEvents, raEvents, mapsVenues, nearbyTowns] = await Promise.all([
+    // Crawlee; Resident Advisor is a plain HTTPS call to a free, keyless API), plus Maps
+    // discovery, which is the one Actor call here.
+    const [aggregatorEvents, raEvents, mapsVenues] = await Promise.all([
         crawlAggregators(),
         crawlResidentAdvisor({ dateRangeDays }),
         discoverClubSitesViaMaps({ cityCoords, radiusKm, maxMapsVenues }),
-        includeFacebookEvents ? findNearbyTowns({ center: cityCoords, radiusKm }) : Promise.resolve([]),
     ]);
 
-    // Phase 2 — Facebook, which needs phase 1's nearby-town list to search places Facebook
-    // actually indexes rather than the literal input city.
-    const facebookEvents = includeFacebookEvents
-        ? await crawlFacebookEvents({ genres, city, searchCities: nearbyTowns, maxFacebookEvents })
-        : [];
-
-    // Phase 3 — club sites, one Actor call each, so only crawl venues that could actually be
+    // Phase 2 — club sites, one Actor call each, so only crawl venues that could actually be
     // in range. Facebook pages are excluded from *this* step: website-content-crawler in
     // cheerio mode gets nothing useful from facebook.com (it needs JS and a session). Maps
     // discovery frequently returns a venue's Facebook page as its "website", and those are
@@ -163,12 +174,11 @@ try {
         ? await crawlFacebookVenuePages({ venues: venuePages, maxFacebookEvents })
         : [];
 
-    let candidates = [...raEvents, ...aggregatorEvents, ...clubEvents, ...facebookVenueEvents, ...facebookEvents];
+    let candidates = [...raEvents, ...aggregatorEvents, ...clubEvents, ...facebookVenueEvents];
     log.info(
         `Collected ${candidates.length} raw candidate event(s): ` +
             `${raEvents.length} Resident Advisor, ${aggregatorEvents.length} aggregator, ` +
-            `${clubEvents.length} club site, ${facebookVenueEvents.length} Facebook venue page, ` +
-            `${facebookEvents.length} Facebook search.`,
+            `${clubEvents.length} club site, ${facebookVenueEvents.length} Facebook venue page.`,
     );
 
     // Keep only events matching a requested genre (an event can match more than one).
@@ -212,24 +222,46 @@ try {
 
     const beforeCityFilter = candidates.length;
     const cityFiltered = [];
+    let cityChecksSkippedForTime = 0;
     for (const event of candidates) {
         // Events that already carry exact coordinates skip this — they're judged directly.
         const hasCoords = typeof event.lat === 'number' && typeof event.lon === 'number';
-        if (hasCoords || (await cityIsPlausiblyInRange(event.city))) cityFiltered.push(event);
+        if (hasCoords) {
+            cityFiltered.push(event);
+            continue;
+        }
+        // Out of time: an event we can't place can't clear the radius filter anyway, so
+        // stop paying for lookups and let the ones already located go through.
+        if (outOfGeocodingTime()) {
+            cityChecksSkippedForTime += 1;
+            continue;
+        }
+        if (await cityIsPlausiblyInRange(event.city)) cityFiltered.push(event);
     }
     candidates = cityFiltered;
     log.info(
         `${candidates.length} remain after city-level pre-filter ` +
             `(dropped ${beforeCityFilter - candidates.length} in cities outside the radius, without geocoding each venue).`,
     );
+    if (cityChecksSkippedForTime > 0) {
+        log.warning(
+            `Ran out of geocoding time: skipped the city check for ${cityChecksSkippedForTime} candidate(s) ` +
+                `so this run can still publish what it placed.`,
+        );
+    }
 
     // Fine pass: geocode the remaining venues and filter precisely. Events whose venue
     // coordinates are already known (Maps discovery, Facebook) skip this entirely.
     const withDistance = [];
     let uncodableCount = 0;
     let tooFarCount = 0;
+    let venuesSkippedForTime = 0;
     for (const event of candidates) {
         let venueCoords = typeof event.lat === 'number' && typeof event.lon === 'number' ? { lat: event.lat, lon: event.lon } : null;
+        if (!venueCoords && outOfGeocodingTime()) {
+            venuesSkippedForTime += 1;
+            continue; // same trade as above: publish what's placed rather than lose the run
+        }
         if (!venueCoords) {
             // Never fold the *input* city into this query. Doing so was the bug that let a
             // Berlin Facebook event pass a 50km radius filter — "{Berlin venue}, Návsí" doesn't
@@ -275,6 +307,13 @@ try {
         `${withDistance.length} remain after geocoding + radius filtering (within ${radiusKm}km) — ` +
             `dropped ${uncodableCount} unplaceable, ${tooFarCount} too far.`,
     );
+    if (venuesSkippedForTime > 0) {
+        log.warning(
+            `Ran out of geocoding time: ${venuesSkippedForTime} candidate(s) were never geocoded, so this ` +
+                `result is incomplete. Re-running fills them in — successful lookups are cached in the ` +
+                `key-value store, so the next run gets further.`,
+        );
+    }
 
     // Dedupe across sources, preferring higher-confidence sources when the same event
     // appears more than once (sort so the highest-confidence copy is seen first and kept).
