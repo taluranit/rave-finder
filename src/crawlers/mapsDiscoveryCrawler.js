@@ -15,18 +15,41 @@ const SEARCH_TERMS = ['night club', 'hudební klub', 'taneční klub'];
 // venues aren't trustedElectronic) already drops non-electronic events from anything that
 // slips through, but there's no reason to spend a website-content-crawler call and memory
 // finding that out for a tennis club.
-// Leading \b only (no trailing \b): Czech/Slovak/Polish declension endings mean a whole-word
-// match like \bakadem\b never matches "Akademia" — the suffix continues right after the stem
-// with no word-boundary transition. Deliberately excludes "café"/"kavárna": a live run showed
-// that's too common a naming pattern for genuine live-music venues (e.g. our own confirmed
-// "Rock Café Jablunkov") to safely treat as a coffee-shop signal.
-// "tanečn"/"tanec"/"dance school" covers ballroom and competitive dance clubs, which Maps
-// returns in numbers for a "dance/club" search but which never publish a DJ programme: a live
-// Návsí run spent 4 of its 13 crawl slots on Dance School Chlopčík, TK Trend Ostrava, Taneční
-// klub AKCENT and Taneční skupina Aktiv, all yielding nothing. Matched as a prefix rather than
-// a whole word, because Czech inflects the suffix ("taneční", "tanečního", "tanečná").
-const EXCLUDED_NAME_RE =
-    /\b(tenis|tennis|paraglid|lions|rotary|kiwanis|skaut|scout|hasič|hasic|škol|skol|szkoł|akadem|studi|kurz|restaurac|jídeln|jidelni|grill|bistro|hotel|penzion|kostel|church|muzeum|museum|galeri|gallery|divadl|kino|cinema|fotbal|football|hokej|hockey|volejbal|golf|fitness|jóg|jog|yog|smak|tanečn|tanecn|tanec\b|dance (school|studio|academy)|zumba|balet|ballet)/i;
+// Stems, not whole words: Czech/Slovak/Polish declension means a whole-word match like
+// \bakadem\b never matches "Akademia" — the suffix continues straight after the stem with no
+// boundary transition. So each entry matches from a left boundary onward and lets the ending
+// run on ("taneční", "tanečního", "tanečná").
+//
+// That left boundary is a Unicode-aware lookbehind, NOT \b. JavaScript's \b is defined on
+// ASCII word characters only, so between a space and "š" there is no boundary at all and
+// /\bškol/ can never match "Základní umělecká škola" — that entry sat in this list doing
+// nothing, and art schools kept reaching the crawler (Orlová, Karolinka, Rožnov, Bedřicha
+// Smetany). Any future entry starting with a diacritic would have failed the same silent way.
+//
+// Deliberately excludes "café"/"kavárna": a live run showed that's too common a naming
+// pattern for genuine live-music venues (our own confirmed "Rock Café Jablunkov") to treat as
+// a coffee-shop signal. "school" carries an "old school" guard for the same reason — it's a
+// plausible club name.
+//
+// The dance entries earn their place: Maps returns ballroom and competitive dance clubs in
+// numbers for a "dance/club" search and none of them publish a DJ programme. A live Návsí run
+// spent 4 of its 13 crawl slots on Dance School Chlopčík, TK Trend Ostrava, Taneční klub
+// AKCENT and Taneční skupina Aktiv, all yielding nothing.
+const EXCLUDED_NAME_STEMS = [
+    'tenis', 'tennis', 'paraglid', 'lions', 'rotary', 'kiwanis', 'skaut', 'scout', 'hasič', 'hasic',
+    // Schools of every stripe. Czech "škol" covers "škola"/"školy"/"Základní umělecká škola";
+    // the English form appeared as "Secondary Technical School Karvina".
+    'škol', 'skol', 'szkoł', '(?<!old )school', 'zuš', 'akadem', 'studi', 'kurz', 'gymnázi', 'gymnazi',
+    'restaurac', 'jídeln', 'jidelni', 'grill', 'bistro', 'hotel', 'penzion',
+    'kostel', 'church', 'muzeum', 'museum', 'galeri', 'gallery', 'divadl', 'kino', 'cinema',
+    // Gambling venues, which Maps returns for "night club" searches — a Třinec run crawled
+    // KASINO KAJOT INTACTO for nothing.
+    'kasino', 'casino', 'herna',
+    'fotbal', 'football', 'hokej', 'hockey', 'volejbal', 'golf', 'fitness', 'jóg', 'jog', 'yog', 'smak',
+    'tanečn', 'tanecn', 'tanec(?![\\p{L}\\p{N}])', 'dance (school|studio|academy)', 'zumba', 'balet', 'ballet',
+];
+const EXCLUDED_NAME_RE = new RegExp(`(?<![\\p{L}\\p{N}])(?:${EXCLUDED_NAME_STEMS.join('|')})`, 'iu');
+
 
 /**
  * Discovers club-like venues near a geocoded point via Google Maps (compass/crawler-google-places,
