@@ -40,7 +40,11 @@ const EXCLUDED_NAME_STEMS = [
     // Schools of every stripe. Czech "škol" covers "škola"/"školy"/"Základní umělecká škola";
     // the English form appeared as "Secondary Technical School Karvina".
     'škol', 'skol', 'szkoł', '(?<!old )school', 'zuš', 'akadem', 'studi', 'kurz', 'gymnázi', 'gymnazi',
-    'restaurac', 'jídeln', 'jidelni', 'grill', 'bistro', 'hotel', 'penzion',
+    'restaurac', 'jídeln', 'jidelni', 'grill', 'bistro', 'hotel',
+    // Guesthouses in three languages: Třinec is 15km from the Polish border, so Maps
+    // returns Polish results too and the Czech-only 'penzion' missed "Pensjonat Pod
+    // Piramida".
+    'penzion', 'pensjonat', 'pension',
     'kostel', 'church', 'muzeum', 'museum', 'galeri', 'gallery', 'divadl', 'kino', 'cinema',
     // Gambling venues, which Maps returns for "night club" searches — a Třinec run crawled
     // KASINO KAJOT INTACTO for nothing.
