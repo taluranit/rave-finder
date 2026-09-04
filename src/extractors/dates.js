@@ -43,7 +43,7 @@ function toIsoDate(year, month, day) {
  * Assuming the current year instead means a past event stays in the past and gets dropped by
  * the date-range filter, which is the right outcome. The cost is missing a genuinely
  * next-January event listed without a year. That trade is deliberate: a miss is a gap in
- * coverage, a phantom is wrong data in the user's digest.
+ * coverage, a phantom is wrong data in the output.
  */
 function inferYear() {
     return new Date().getUTCFullYear();

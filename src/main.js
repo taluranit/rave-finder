@@ -7,7 +7,6 @@ import { crawlResidentAdvisor } from './crawlers/residentAdvisorCrawler.js';
 import { CLUB_SITES, FACEBOOK_VENUE_PAGES } from './sources/seedSources.js';
 import { geocode, haversineDistanceKm } from './geocode.js';
 import { dedupeEvents } from './dedupe.js';
-import { maybeSendDigest } from './email.js';
 
 const CONFIDENCE_RANK = { high: 0, moderate: 1, low: 2 };
 
@@ -98,9 +97,6 @@ try {
         includeFacebookVenuePages = true,
         maxFacebookEvents = 20,
         maxMapsVenues = 5,
-        subscriberEmail,
-        digestFrequency = 'weekly',
-        resendApiKey,
     } = input;
 
     if (!city) {
@@ -297,7 +293,7 @@ try {
             // The event's own city, or blank — never the *input* city as a fallback. Defaulting
             // to the input labelled a Resident Advisor event at Dock, 43km away in Ostrava, as
             // being in "Návsí". The distance is right there in the same record contradicting
-            // it, and a digest that says an event is in your village when it isn't is worse
+            // it, and output that says an event is in your village when it isn't is worse
             // than one that admits it doesn't know the town.
             city: cityLabel(event.city),
         });
@@ -339,8 +335,6 @@ try {
             confidence: event.confidence,
         })),
     );
-
-    await maybeSendDigest({ subscriberEmail, resendApiKey, digestFrequency, events: finalEvents });
 
     await Actor.exit();
 } catch (err) {

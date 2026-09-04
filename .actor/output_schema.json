@@ -12,7 +12,7 @@
         "state": {
             "type": "string",
             "title": "Run state",
-            "description": "Key-value store holding the geocode cache and email digest history",
+            "description": "Key-value store holding the geocode cache",
             "template": "{{links.apiDefaultKeyValueStoreUrl}}/keys"
         }
     }

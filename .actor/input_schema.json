@@ -77,39 +77,6 @@
             "editor": "number",
             "default": 5,
             "minimum": 0
-        },
-        "subscriberEmail": {
-            "title": "Subscriber email (optional)",
-            "type": "string",
-            "description": "If set, a periodic email digest of newly found matching events is sent to this address via Resend.",
-            "editor": "textfield",
-            "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
-        },
-        "digestFrequency": {
-            "title": "Digest frequency",
-            "type": "string",
-            "description": "How often to send the email digest. The Actor can run more often than this (e.g. on a daily schedule) — it will only actually send once enough time has passed since the last send.",
-            "editor": "select",
-            "enum": [
-                "daily",
-                "weekly",
-                "biweekly",
-                "monthly"
-            ],
-            "enumTitles": [
-                "Daily",
-                "Weekly",
-                "Every 2 weeks",
-                "Monthly"
-            ],
-            "default": "weekly"
-        },
-        "resendApiKey": {
-            "title": "Resend API key (optional)",
-            "type": "string",
-            "description": "Required only if subscriberEmail is set. Get one at resend.com. Pass this as a secret input, never commit it.",
-            "editor": "textfield",
-            "isSecret": true
         }
     },
     "required": [

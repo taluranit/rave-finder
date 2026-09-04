@@ -4,7 +4,7 @@ Finds upcoming **electronic music and DJ events** — techno, house, drum & bass
 generally-electronic events that don't name a specific genre — near a Czech city, within a
 radius you choose. Searches Resident Advisor, event aggregators (GoOut, DnB e-Heard,
 ColosseumTicket, KdyKde, xTicket, KoncertyPraha, Rave.cz), club websites, and Facebook
-Events. Optionally sends you a periodic email digest of newly found events.
+Events.
 
 **v1 scope: Czech Republic only.**
 
@@ -95,7 +95,6 @@ Events. Optionally sends you a periodic email digest of newly found events.
 5. Filters by requested genres and date range, then dedupes events that show up on more
    than one source.
 6. Pushes the results to the default dataset.
-7. If you gave a `subscriberEmail`, sends an email digest of newly found events (see below).
 
 ## Why Facebook's event search was removed
 
@@ -193,32 +192,8 @@ per second by Nominatim's usage policy — which is why events are filtered by c
 | `includeFacebookVenuePages` | boolean | `true` | Ask in-range venues' Facebook pages what they have on. The only Facebook path — the event search was removed, see below. |
 | `maxFacebookEvents` | integer | `20` | Total budget for Facebook venue-page events, split evenly across the pages asked, to control cost. |
 | `maxMapsVenues` | integer | `5` | Caps Maps-discovered venues per search term, to control cost; `0` disables Maps discovery. Low by default — each discovered venue costs an Actor call, and most Maps hits are dance schools and bars, not electronic venues. |
-| `subscriberEmail` | string | *(none)* | If set, enables the email digest (see below). |
-| `digestFrequency` | enum | `weekly` | `daily` / `weekly` / `biweekly` / `monthly`. |
-| `resendApiKey` | string (secret) | *(none)* | Required only if `subscriberEmail` is set. |
 
 See `.actor/input_schema.json` for the full schema.
-
-## Email digest setup
-
-The digest uses the [Resend](https://resend.com) REST API directly (no SDK). To enable it:
-
-1. Create a free Resend account and grab an API key.
-2. Set `subscriberEmail` to your address and `resendApiKey` to the key, as Actor input.
-   **Never commit the key** — pass it as a secret input field (it's already marked
-   `isSecret: true` in the input schema) or as an environment variable on the platform.
-3. Emails are sent from Resend's shared sandbox sender (`onboarding@resend.dev`). This
-   works out of the box but looks like a sandbox sender to recipients — **verify your own
-   domain in Resend and update `SANDBOX_SENDER` in `src/email.js`** before using this for
-   anything beyond personal use.
-
-The Actor can run on a frequent schedule (e.g. daily) — it tracks the last-sent time and
-already-seen events per subscriber in the key-value store, and only actually sends once
-enough time has passed for the chosen `digestFrequency`. If nothing new was found since
-the last send, it skips sending (and doesn't reset the timer).
-
-If `subscriberEmail` or `resendApiKey` is missing, the digest step is skipped silently —
-it's an optional feature, not a required one.
 
 ## Running locally
 
@@ -250,7 +225,6 @@ src/concurrency.js          Bounded-concurrency helper for crawling many sites i
 src/geocode.js              Nominatim geocoding + Haversine distance, KV-cached
 src/genreClassifier.js      Genre classification: specific keywords, trusted-source fallback
 src/dedupe.js               Cross-source duplicate detection
-src/email.js                Resend digest sending + per-subscriber throttling
 Dockerfile                  apify/actor-node base image
 ```
 
@@ -266,7 +240,7 @@ Dockerfile                  apify/actor-node base image
   genuinely next-January event listed as "9. 1." will be dated this January and dropped.
   Deliberate: the alternative (rolling past months forward) turned dnbeheard.cz's 501
   entries into a wall of January-2027 parties that don't exist. A miss is a gap in coverage;
-  a phantom is wrong data in the digest.
+  a phantom is wrong data in the output.
 - Genre/electronic-music detection is keyword-based for anything not from a
   `trustedElectronic` source. The vocabulary covers genre names, lineup notation (`w/`, `b2b`,
   `dj set`, `DJane`), the bass/beat/trance word family, and a short list of named brands

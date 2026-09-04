@@ -2,7 +2,7 @@
     "actorSpecification": 1,
     "name": "rave-finder",
     "title": "Rave Finder",
-    "description": "Finds upcoming electronic music and DJ events near a Czech city within a chosen radius, pulling from Resident Advisor, event aggregators, club websites, and Facebook Events. Optionally emails a periodic digest of newly found events.",
+    "description": "Finds upcoming electronic music and DJ events near a Czech city within a chosen radius, pulling from Resident Advisor, event aggregators, club websites, and venue Facebook pages.",
     "version": "0.1",
     "buildTag": "latest",
     "meta": {
