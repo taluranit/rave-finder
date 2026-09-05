@@ -62,6 +62,14 @@
             "description": "Fetch events directly from the Facebook pages of venues already found to be in range, instead of using Facebook's event search. On by default: verified live that a venue page's events tab returns real dated events with coordinates, and cost scales with the number of nearby venues rather than with search noise. Shares the maxFacebookEvents cap.",
             "default": true
         },
+        "facebookPages": {
+            "title": "Extra Facebook pages or events",
+            "type": "array",
+            "description": "Facebook page or event URLs to check in addition to the built-in venues. Use this when you know a local promoter or venue the Actor doesn't: around small towns the promoter creates the event and only tags the venue, so the venue's own page won't list it. Paste either a page URL (https://www.facebook.com/somepromoter) or a single event URL — both work. Each page costs one Actor call and shares the maxFacebookEvents budget.",
+            "editor": "stringList",
+            "default": [],
+            "prefill": []
+        },
         "maxFacebookEvents": {
             "title": "Max Facebook events",
             "type": "integer",

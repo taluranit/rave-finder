@@ -55,6 +55,12 @@ function cityLabel(city) {
     return (city || '').replace(/,?\s*(czech republic|czechia|česká republika|cesko|česko)\s*$/i, '').trim();
 }
 
+/** Readable source label for a user-supplied Facebook URL, e.g. ".../rokac.cz" -> "rokac.cz". */
+function facebookPageLabel(url) {
+    const path = url.trim().replace(/[?#].*$/, '').replace(/\/+$/, '').split('facebook.com/')[1] || url;
+    return path.replace(/\/(upcoming_hosted_events|past_hosted_events|events)$/, '') || url;
+}
+
 /**
  * True if a venue could plausibly fall inside the search radius, so it's worth spending an
  * Actor call crawling it. Searching Návsí previously crawled Cross Club, Roxy, Ankali,
@@ -95,6 +101,7 @@ try {
         genres = ['techno', 'house', 'drum_and_bass', 'electronic'],
         dateRangeDays = 30,
         includeFacebookVenuePages = true,
+        facebookPages = [],
         maxFacebookEvents = 20,
         maxMapsVenues = 5,
     } = input;
@@ -130,9 +137,22 @@ try {
     // routed to crawlFacebookVenuePages below instead, which is the right tool for them.
     // Distance-filter every known venue first — seeded sites, Facebook-only venues, and
     // Maps discoveries alike — then split by what can actually be fetched from each.
+    // User-supplied Facebook pages, from the `facebookPages` input. They carry no city, which
+    // means venueCouldBeInRange lets them through unconditionally — deliberate, since the
+    // point is to reach a promoter the Actor doesn't know about and whose town it can't guess.
+    // Nothing is lost by that: Facebook returns real venue coordinates, so the per-event
+    // radius filter still decides whether the result is actually nearby.
+    const userVenues = facebookPages
+        .filter((url) => typeof url === 'string' && /facebook\.com/i.test(url))
+        .map((url) => ({ name: facebookPageLabel(url), city: '', facebookPage: url.trim(), confidence: 'moderate' }));
+    if (facebookPages.length > userVenues.length) {
+        log.warning(`Ignored ${facebookPages.length - userVenues.length} facebookPages entr(ies) that aren't facebook.com URLs.`);
+    }
+
     const knownVenues = [
         ...CLUB_SITES,
         ...FACEBOOK_VENUE_PAGES,
+        ...userVenues,
         ...mapsVenues.filter((v) => !/facebook\.com/i.test(v.url)),
     ];
     const inRangeVenues = [];

@@ -96,6 +96,32 @@ Events.
    than one source.
 6. Pushes the results to the default dataset.
 
+## Adding a promoter page
+
+Around small towns the **promoter** creates the event and only tags the venue, so a venue's
+own Facebook page often won't list it. A live example: a Jablunkov event the Actor missed was
+nowhere on Rock Café's page (its Upcoming started the following day and its Past stopped two
+weeks earlier), nowhere in any wired source, and not indexed by DuckDuckGo or Bing. Facebook's
+own search is the only place it exists, and that needs a login this Actor doesn't have.
+
+So `facebookPages` lets you close that gap yourself, without a code change or redeploy: paste
+the promoter's page URL into the Actor input and it's scraped alongside the built-in venues.
+
+- Either shape works — a page URL (`https://www.facebook.com/somepromoter`) gets the events
+  tab appended automatically, and a single event URL (`https://www.facebook.com/events/123/`)
+  is passed through untouched. Trailing slashes, query strings and stray whitespace are fine.
+- Entries that aren't facebook.com URLs are skipped with a warning rather than wasting a call.
+- These pages deliberately skip the city pre-filter, since the point is to reach a promoter
+  whose town the Actor can't guess. Nothing is lost by that: Facebook returns real venue
+  coordinates, so the per-event radius filter still decides what's actually nearby.
+- A page already covered by the seed list is deduplicated, so adding one you already have
+  costs nothing.
+- Each page costs one Actor call and shares the `maxFacebookEvents` budget.
+
+**Same-day events are a blind spot.** Facebook moves an event out of "Upcoming" once it has
+started, so an evening run won't see anything happening that same evening — the scraper reads
+the upcoming tab only. Run in the morning for same-day coverage.
+
 ## Why Facebook's event search was removed
 
 Facebook's event search is keyword matching, not a location filter, so the place name in a
@@ -190,6 +216,7 @@ per second by Nominatim's usage policy — which is why events are filtered by c
 | `genres` | array | all four | `techno`, `house`, `drum_and_bass`, `electronic` (generic — electronic/DJ events with no specific genre named). |
 | `dateRangeDays` | integer | `30` | Only include events within this many days from now (1–180). |
 | `includeFacebookVenuePages` | boolean | `true` | Ask in-range venues' Facebook pages what they have on. The only Facebook path — the event search was removed, see below. |
+| `facebookPages` | array | `[]` | Extra Facebook page or event URLs to check alongside the built-in venues. See below. |
 | `maxFacebookEvents` | integer | `20` | Total budget for Facebook venue-page events, split evenly across the pages asked, to control cost. |
 | `maxMapsVenues` | integer | `5` | Caps Maps-discovered venues per search term, to control cost; `0` disables Maps discovery. Low by default — each discovered venue costs an Actor call, and most Maps hits are dance schools and bars, not electronic venues. |
 

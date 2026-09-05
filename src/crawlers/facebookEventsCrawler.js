@@ -65,8 +65,7 @@ export async function crawlFacebookVenuePages({ venues, maxFacebookEvents }) {
     // so the resulting events can inherit that venue's trust level.
     const venueByUrl = new Map();
     for (const venue of venues) {
-        const pageUrl = venue.facebookPage.replace(/\/+$/, '');
-        venueByUrl.set(`${pageUrl}/upcoming_hosted_events`, venue);
+        venueByUrl.set(toScrapableUrl(venue.facebookPage), venue);
     }
     const startUrls = [...venueByUrl.keys()];
 
@@ -140,6 +139,22 @@ export async function crawlFacebookVenuePages({ venues, maxFacebookEvents }) {
 
     log.info(`Facebook venue pages: ${results.length} event(s) kept, ${nonMusicSkipped} skipped as clearly non-music.`);
     return keepPlaceableEvents(results);
+}
+
+/**
+ * Normalises a Facebook URL into something the scraper can read.
+ *
+ * A page URL has to point at the events tab: `facebook.com/rokac.cz` returns one empty record
+ * while `facebook.com/rokac.cz/upcoming_hosted_events` returns the real dated events. A single
+ * event URL (`facebook.com/events/<id>/`) is already directly scrapable and must be left
+ * alone — appending the tab to it would produce a URL for nothing. This matters because
+ * `facebookPages` is a user input: people paste whichever link they happened to copy.
+ */
+function toScrapableUrl(url) {
+    const trimmed = (url || '').trim().replace(/[?#].*$/, '').replace(/\/+$/, '');
+    if (/\/events\/\d+$/.test(trimmed)) return trimmed;
+    if (/\/(upcoming_hosted_events|past_hosted_events|events)$/.test(trimmed)) return trimmed;
+    return `${trimmed}/upcoming_hosted_events`;
 }
 
 /**
